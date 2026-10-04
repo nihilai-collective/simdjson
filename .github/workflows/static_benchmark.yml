@@ -1,0 +1,95 @@
+
+name: Static Reflection Benchmarks
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - comparison
+
+jobs:
+  benchmark:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: "Linux GCC"
+            tag: ubuntu-gcc
+          - os: macos-latest
+            name: "macOS GCC"
+            tag: macos-gcc
+
+    runs-on: ${{ matrix.os }}
+    name: Benchmark on ${{ matrix.name }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup GCC (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo add-apt-repository ppa:ubuntu-toolchain-r/test -y
+          sudo apt-get update
+          DEV_VERSION=$(apt-cache search '^g\+\+-[0-9]+$' | awk '{print $1}' | sort -V | tail -n 1 | sed 's/g++-//')
+          sudo apt-get install -y gcc-$DEV_VERSION g++-$DEV_VERSION ninja-build
+          echo "CXX_BIN=/usr/bin/g++-$DEV_VERSION" >> $GITHUB_ENV
+          echo "C_BIN=/usr/bin/gcc-$DEV_VERSION" >> $GITHUB_ENV
+      - name: Setup GCC (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          brew install gcc ninja
+          GCC_VERSION=$(brew list --versions gcc | awk '{print $2}' | cut -d. -f1)
+          echo "CXX_BIN=g++-$GCC_VERSION" >> $GITHUB_ENV
+          echo "C_BIN=gcc-$GCC_VERSION" >> $GITHUB_ENV
+      - name: Require GCC 16+ for static reflection
+        run: |
+          ${{ env.CXX_BIN }} --version
+          MAJOR=$(${{ env.CXX_BIN }} -dumpversion | cut -d. -f1)
+          if [ "$MAJOR" -lt 16 ]; then
+            echo "::error::GCC $MAJOR has no -freflection; static reflection needs GCC 16 or newer"
+            exit 1
+          fi
+      - name: Configure CMake
+        run: >
+          cmake -S . -B build -GNinja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_CXX_COMPILER=${{ env.CXX_BIN }}
+          -DCMAKE_C_COMPILER=${{ env.C_BIN }}
+          -DSIMDJSON_STATIC_REFLECTION_MODE=ON
+          -DSIMDJSON_DEVELOPER_MODE=ON
+      - name: Build
+        run: >
+          cmake --build build --target
+          benchmark_parsing_twitter
+          benchmark_serialization_twitter
+          benchmark_parsing_citm
+          benchmark_serialization_citm_catalog
+          benchmark_parsing_recipe_book
+      - name: Run
+        continue-on-error: true
+        run: |
+          mkdir -p results
+          OUT=results/${{ matrix.tag }}.txt
+          ${{ env.CXX_BIN }} --version | head -n 1 > "$OUT"
+          for bench in \
+            twitter_benchmark/benchmark_parsing_twitter \
+            twitter_benchmark/benchmark_serialization_twitter \
+            citm_catalog_benchmark/benchmark_parsing_citm \
+            citm_catalog_benchmark/benchmark_serialization_citm_catalog \
+            recipe_book_benchmark/benchmark_parsing_recipe_book; do
+            echo "## $bench" | tee -a "$OUT"
+            sudo -E env "PATH=$PATH" ./build/benchmark/static_reflect/$bench 2>&1 | tee -a "$OUT"
+          done
+          {
+            echo "### ${{ matrix.name }}"
+            echo '```'
+            cat "$OUT"
+            echo '```'
+          } >> $GITHUB_STEP_SUMMARY
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: static-reflect-${{ matrix.tag }}
+          path: results/
