@@ -1,0 +1,89 @@
+name: Static Reflection Benchmark
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - add_jsonifier_static_new
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - os: ubuntu-latest
+            name: "Linux GCC"
+            container: "gcc:16"
+            artifact: static-reflection-ubuntu-gcc
+          - os: macos-latest
+            name: "macOS GCC"
+            container: ""
+            artifact: static-reflection-macos-gcc
+
+    runs-on: ${{ matrix.config.os }}
+    container: ${{ matrix.config.container }}
+    name: Benchmark on ${{ matrix.config.name }}
+
+    env:
+      BENCHMARKS: >-
+        twitter_benchmark/benchmark_parsing_twitter
+        twitter_benchmark/benchmark_serialization_twitter
+        citm_catalog_benchmark/benchmark_parsing_citm
+        citm_catalog_benchmark/benchmark_serialization_citm_catalog
+        recipe_book_benchmark/benchmark_parsing_recipe_book
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup GCC (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          apt-get -y update
+          apt-get -y --no-install-recommends install cmake ninja-build git
+          echo "CXX_BIN=$(command -v g++)" >> $GITHUB_ENV
+          echo "C_BIN=$(command -v gcc)" >> $GITHUB_ENV
+
+      - name: Setup GCC (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install gcc ninja
+          DEV_VERSION=$(ls "$(brew --prefix)/bin" | grep -E '^g\+\+-[0-9]+$' | sed 's/g++-//' | sort -n | tail -n 1)
+          [ -n "$DEV_VERSION" ] || { echo "no Homebrew g++ found"; exit 1; }
+          echo "CXX_BIN=$(brew --prefix)/bin/g++-$DEV_VERSION" >> $GITHUB_ENV
+          echo "C_BIN=$(brew --prefix)/bin/gcc-$DEV_VERSION" >> $GITHUB_ENV
+
+      - name: Configure CMake
+        run: >-
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_CXX_COMPILER=${{ env.CXX_BIN }}
+          -DCMAKE_C_COMPILER=${{ env.C_BIN }}
+          -DSIMDJSON_DEVELOPER_MODE=ON
+          -DSIMDJSON_STATIC_REFLECTION_MODE=ON
+          -DBUILD_SHARED_LIBS=OFF
+
+      - name: Build
+        run: |
+          TARGETS=""
+          for b in $BENCHMARKS; do TARGETS="$TARGETS $(basename $b)"; done
+          cmake --build build --config Release -v --target $TARGETS
+
+      - name: Run
+        continue-on-error: true
+        run: |
+          mkdir -p results
+          if [ "$RUNNER_OS" = "macOS" ]; then sysctl -n machdep.cpu.brand_string hw.ncpu hw.memsize; else lscpu; fi | tee results/cpu.txt
+          "$CXX_BIN" --version | tee results/compiler.txt
+          for b in $BENCHMARKS; do
+            echo "::group::$(basename $b)"
+            ./build/benchmark/static_reflect/$b 2>&1 | tee "results/$(basename $b).txt"
+            echo "::endgroup::"
+          done
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.config.artifact }}
+          path: results/

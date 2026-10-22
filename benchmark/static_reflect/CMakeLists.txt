@@ -18,7 +18,7 @@ target_compile_definitions(glaze INTERFACE SIMDJSON_COMPETITION_GLAZE)
 
 CPMAddPackage(
   NAME jsonifier
-  URL https://github.com/nihilai-collective/jsonifier/archive/77292a488dd5b32265dde263f432e52e5760c830.zip
+  URL https://github.com/nihilai-collective/jsonifier/archive/868dc5b82caa8ebfbc16a0966b0fd69726e6040a.zip
   EXCLUDE_FROM_ALL YES
 )
 target_compile_definitions(Jsonifier INTERFACE SIMDJSON_COMPETITION_JSONIFIER)
