@@ -1,0 +1,145 @@
+name: Static Reflection Benchmark
+run-name: ${{ inputs.leg && format('{0} attempt {1}', inputs.leg, inputs.attempt) || github.event.head_commit.message || github.workflow }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      leg:
+        description: 'Single platform to run: ubuntu or macos (leave empty for both)'
+        required: false
+        default: ''
+      attempt:
+        description: 'Attempt number of this leg'
+        required: false
+        default: '1'
+  push:
+    branches:
+      - add_jsonifier_static_new
+
+jobs:
+  Dispatch-Legs:
+    runs-on: ubuntu-latest
+    if: inputs.leg == ''
+    permissions:
+      actions: write
+      contents: read
+    strategy:
+      matrix:
+        leg: [ubuntu, macos]
+
+    steps:
+      - name: Dispatch ${{ matrix.leg }} as its own run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh workflow run static-reflection-benchmark.yml
+          --repo "$GITHUB_REPOSITORY"
+          --ref "$GITHUB_REF_NAME"
+          -f leg=${{ matrix.leg }}
+          -f attempt=1
+
+  build:
+    if: inputs.leg != ''
+    runs-on: ${{ inputs.leg == 'ubuntu' && 'ubuntu-latest' || 'macos-latest' }}
+    container: ${{ inputs.leg == 'ubuntu' && 'gcc:16' || '' }}
+    name: Benchmark on ${{ inputs.leg }} GCC
+    outputs:
+      rejected: ${{ steps.cpu.outputs.rejected }}
+
+    env:
+      BENCHMARKS: >-
+        twitter_benchmark/benchmark_parsing_twitter
+        twitter_benchmark/benchmark_serialization_twitter
+        citm_catalog_benchmark/benchmark_parsing_citm
+        citm_catalog_benchmark/benchmark_serialization_citm_catalog
+        recipe_book_benchmark/benchmark_parsing_recipe_book
+
+    steps:
+      - name: Reject macOS runners that are not Apple M2 Pro
+        id: cpu
+        if: runner.os == 'macOS'
+        env:
+          ATTEMPT: ${{ inputs.attempt }}
+        run: |
+          CPU=$(sysctl -n machdep.cpu.brand_string)
+          echo "CPU: $CPU"
+          if [[ "$CPU" != *"M2 Pro"* ]]; then
+            echo "rejected=true" >> "$GITHUB_OUTPUT"
+            echo "Landed on $CPU on attempt $ATTEMPT, aborting so this leg reruns on a different runner." >&2
+            exit 1
+          fi
+
+      - uses: actions/checkout@v6
+
+      - name: Setup GCC (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          apt-get -y update
+          apt-get -y --no-install-recommends install cmake ninja-build git
+          echo "CXX_BIN=$(command -v g++)" >> $GITHUB_ENV
+          echo "C_BIN=$(command -v gcc)" >> $GITHUB_ENV
+
+      - name: Setup GCC (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install gcc ninja
+          DEV_VERSION=$(ls "$(brew --prefix)/bin" | grep -E '^g\+\+-[0-9]+$' | sed 's/g++-//' | sort -n | tail -n 1)
+          [ -n "$DEV_VERSION" ] || { echo "no Homebrew g++ found"; exit 1; }
+          echo "CXX_BIN=$(brew --prefix)/bin/g++-$DEV_VERSION" >> $GITHUB_ENV
+          echo "C_BIN=$(brew --prefix)/bin/gcc-$DEV_VERSION" >> $GITHUB_ENV
+
+      - name: Configure CMake
+        run: >-
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_CXX_COMPILER=${{ env.CXX_BIN }}
+          -DCMAKE_C_COMPILER=${{ env.C_BIN }}
+          -DSIMDJSON_DEVELOPER_MODE=ON
+          -DSIMDJSON_STATIC_REFLECTION_MODE=ON
+          -DBUILD_SHARED_LIBS=OFF
+
+      - name: Build
+        run: |
+          TARGETS=""
+          for b in $BENCHMARKS; do TARGETS="$TARGETS $(basename $b)"; done
+          cmake --build build --config Release -v --target $TARGETS
+
+      - name: Run
+        continue-on-error: true
+        run: |
+          mkdir -p results
+          if [ "$RUNNER_OS" = "macOS" ]; then sysctl -n machdep.cpu.brand_string hw.ncpu hw.memsize; else lscpu; fi | tee results/cpu.txt
+          "$CXX_BIN" --version | tee results/compiler.txt
+          for b in $BENCHMARKS; do
+            echo "::group::$(basename $b)"
+            ./build/benchmark/static_reflect/$b 2>&1 | tee "results/$(basename $b).txt"
+            echo "::endgroup::"
+          done
+
+      - name: Upload results
+        if: always() && steps.cpu.outcome != 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: static-reflection-${{ inputs.leg }}-gcc
+          path: results/
+
+  Relaunch-Leg:
+    runs-on: ubuntu-latest
+    needs: build
+    if: always() && needs.build.outputs.rejected == 'true' && fromJSON(inputs.attempt) < 100
+    permissions:
+      actions: write
+      contents: read
+
+    steps:
+      - name: Dispatch ${{ inputs.leg }} again on a fresh runner
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LEG: ${{ inputs.leg }}
+          ATTEMPT: ${{ inputs.attempt }}
+        run: >-
+          gh workflow run static-reflection-benchmark.yml
+          --repo "$GITHUB_REPOSITORY"
+          --ref "$GITHUB_REF_NAME"
+          -f leg="$LEG"
+          -f attempt=$(( ATTEMPT + 1 ))
