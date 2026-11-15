@@ -483,10 +483,10 @@ inline array::iterator element::end() const noexcept(false) {
 
 #endif // SIMDJSON_EXCEPTIONS
 
-inline simdjson_result<element> element::operator[](std::string_view key) const noexcept {
+simdjson_inline simdjson_result<element> element::operator[](std::string_view key) const noexcept {
   return at_key(key);
 }
-inline simdjson_result<element> element::operator[](const char *key) const noexcept {
+simdjson_inline simdjson_result<element> element::operator[](const char *key) const noexcept {
   return at_key(key);
 }
 
@@ -530,6 +530,7 @@ inline simdjson_result<element> element::at_pointer(std::string_view json_pointe
 
 inline simdjson_result<std::vector<element>> element::at_path_with_wildcard(std::string_view json_path) const noexcept {
   SIMDJSON_DEVELOPMENT_ASSERT(tape.usable()); // https://github.com/simdjson/simdjson/issues/1914
+  if (json_path == "$") { return std::vector<element>{*this}; }
 
   const internal::wildcard_json_path path = internal::parse_wildcard_json_path(json_path);
   // A path that cannot be parsed matches nothing, whatever the document: say
@@ -563,7 +564,7 @@ inline simdjson_result<element> element::at(std::string_view json_pointer) const
 inline simdjson_result<element> element::at(size_t index) const noexcept {
   return get<array>().at(index);
 }
-inline simdjson_result<element> element::at_key(std::string_view key) const noexcept {
+simdjson_inline simdjson_result<element> element::at_key(std::string_view key) const noexcept {
   return get<object>().at_key(key);
 }
 inline simdjson_result<element> element::at_key_case_insensitive(std::string_view key) const noexcept {

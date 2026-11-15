@@ -3,6 +3,7 @@
 #ifndef SIMDJSON_CONDITIONAL_INCLUDE
 #define SIMDJSON_GENERIC_STRING_BUILDER_H
 #include "simdjson/generic/implementation_simdjson_result_base.h"
+#include "simdjson/internal/json_escape.h"
 #endif // SIMDJSON_CONDITIONAL_INCLUDE
 
 namespace simdjson {
@@ -39,6 +40,9 @@ struct has_custom_serialization : std::false_type {};
 
 namespace SIMDJSON_IMPLEMENTATION {
 namespace builder {
+
+using simdjson::internal::escape_best::write_string_escaped;
+
 /**
  * A builder for JSON strings representing documents. This is a low-level
  * builder that is not meant to be used directly by end-users. Though it
@@ -67,6 +71,18 @@ public:
   template<typename number_type,
     typename = typename std::enable_if<std::is_arithmetic<number_type>::value>::type>
   simdjson_inline void append(number_type v) noexcept;
+
+#ifdef __SIZEOF_INT128__
+  /**
+   * Integers wider than 64 bits are not supported. Without these overloads, a
+   * 128-bit integer would either be truncated to 64 bits by append(number_type)
+   * (when the standard library counts it as arithmetic, as libc++ does) or be
+   * converted to char by append(char) (when it does not, as libstdc++ does in
+   * strict ISO mode).
+   */
+  void append(__int128_t v) noexcept = delete;
+  void append(__uint128_t v) noexcept = delete;
+#endif
 
   /**
    * Append character c.
@@ -214,7 +230,23 @@ requires (!std::is_convertible<R, std::string_view>::value && !concepts::optiona
    * The result may not be valid UTF-8 if some of your content was not valid UTF-8.
    * Use validate_unicode() to check the content if needed.
    */
-  simdjson_inline operator std::string() const noexcept(false);
+  simdjson_inline operator std::string() const & noexcept(false);
+
+  /**
+   * Moves the written JSON buffer out of the builder into an std::string,
+   * see move_to(). The builder is left empty and can be reused.
+   * Throws if memory allocation failed.
+   *
+   * Used for copy-initialization from an rvalue, e.g.
+   * `std::string s = std::move(builder);`, and for `return builder;` from a
+   * function returning std::string (implicit move, C++20 or as an extension).
+   * Direct-initialization, `std::string s(std::move(builder));`, may copy
+   * through operator std::string_view() instead, depending on the compiler.
+   *
+   * The result may not be valid UTF-8 if some of your content was not valid UTF-8.
+   * Use validate_unicode() to check the content if needed.
+   */
+  inline operator std::string() && noexcept(false);
 
   /**
    * Creates an std::string_view from the written JSON buffer.

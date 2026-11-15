@@ -2182,7 +2182,7 @@ be represented as `value` instances. You can check that a document is a scalar w
 JSONPath
 ------------
 
-The simdjson library supports a subset of [JSONPath](https://www.rfc-editor.org/rfc/rfc9535) (RFC 9535) through the `at_path()` method, allowing you to reach further into the document in a single call. The subset of JSONPath that is implemented is the subset that is trivially convertible into the JSON Pointer format, using `.` to access a field and `[]` to access a specific index.
+The simdjson library supports a subset of [JSONPath](https://www.rfc-editor.org/rfc/rfc9535) (RFC 9535) through the `at_path()` method, allowing you to reach further into the document in a single call. The subset of JSONPath that is implemented is the subset that is trivially convertible into the JSON Pointer format, using `.` or `['key']` to access a field and `[]` to access a specific index.
 
 This implementation relies on `at_path()` converting its argument to JSON Pointer and then calling `at_pointer`, which makes use of
 [`rewind`](#rewind) to reset the parser at the beginning of the document. Hence, it invalidates all previously parsed values, objects
@@ -2238,6 +2238,13 @@ ondemand::object obj = doc.get_object();
 int64_t x = obj.at_path("$.c.foo.a[1]"); // 20
 x = obj.at_path("$.d.foo2.a.2"); // 30
 ```
+
+The path `$` on its own selects the value it is applied to: `doc.at_path("$")` returns the root
+of the document (a scalar document gives `SCALAR_DOCUMENT_AS_VALUE`, as with `at_path("")`), and
+`value.at_path("$")` returns the value itself. As with `at_pointer("")`, an On-Demand `object` or
+`array` cannot return itself as a value, so `at_path("$")` on them returns `INVALID_JSON_POINTER`.
+The DOM accepts `$` everywhere, and `at_path_with_wildcard("$")` (DOM) and
+`for_each_at_path_with_wildcard("$")` (On-Demand) yield the root as their single match.
 
 ## Using `for_each_at_path_with_wildcard` for JSONPath Queries (On-Demand)
 

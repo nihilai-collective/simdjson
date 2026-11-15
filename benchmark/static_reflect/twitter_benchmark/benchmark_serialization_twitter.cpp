@@ -145,7 +145,7 @@ template <class T> void bench_simdjson_static_reflection(T &data) {
   printf("# output volume: %zu bytes\n", output_volume);
 
   volatile size_t measured_volume = 0;
-  pretty_print(sizeof(data), output_volume, "bench_simdjson_static_reflection",
+  pretty_print(1, output_volume, "bench_simdjson_static_reflection",
                bench([&data, &measured_volume, &output_volume]() {
                  // Fresh allocation each iteration - fair comparison
                  simdjson::builder::string_builder sb;
@@ -174,7 +174,7 @@ template <class T> void bench_simdjson_static_reflection_reuse(T &data) {
   printf("# output volume: %zu bytes\n", output_volume);
 
   volatile size_t measured_volume = 0;
-  pretty_print(sizeof(data), output_volume, "bench_simdjson_reuse_buffer",
+  pretty_print(1, output_volume, "bench_simdjson_reuse_buffer",
                bench([&data, &measured_volume, &output_volume, &sb]() {
                  sb.clear();
                  simdjson::builder::append(sb, data);
@@ -202,7 +202,7 @@ template <class T> void bench_simdjson_to(T &data) {
   printf("# output volume: %zu bytes\n", output_volume);
 
   volatile size_t measured_volume = 0;
-  pretty_print(sizeof(data), output_volume, "bench_simdjson_to",
+  pretty_print(1, output_volume, "bench_simdjson_to",
                bench([&data, &measured_volume, &output_volume]() {
                  // Fresh allocation each iteration - fair comparison
                  std::string output;
@@ -231,7 +231,7 @@ template <class T> void bench_simdjson_to_reuse(T &data) {
   output.reserve(output_volume * 2);
 
   volatile size_t measured_volume = 0;
-  pretty_print(sizeof(data), output_volume, "bench_simdjson_to_reuse",
+  pretty_print(1, output_volume, "bench_simdjson_to_reuse",
                bench([&data, &measured_volume, &output_volume, &output]() {
                  // Reuse the pre-allocated string - avoids allocation
                  if (simdjson::error_code err = simdjson::builder::to_json(data, output); err) {

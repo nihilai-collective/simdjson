@@ -221,7 +221,7 @@ Once you have an element, you can navigate it with idiomatic C++ iterators, oper
   with the `size()` method.
 * **Checking an Element Type:** You can check an element's type with `element.type()`. It
   returns an `element_type` with values such as `simdjson::dom::element_type::ARRAY`, `simdjson::dom::element_type::OBJECT`, `simdjson::dom::element_type::INT64`,  `simdjson::dom::element_type::UINT64`,`simdjson::dom::element_type::DOUBLE`, `simdjson::dom::element_type::STRING`, `simdjson::dom::element_type::BOOL`, `simdjson::dom::element_type::NULL_VALUE` or, `simdjson::dom::element_type::BIGINT` (when big integer support is enabled).
-* **Output to streams and strings:** Given a document or an element (or node) out of a JSON document, you can output a minified string version using the C++ stream idiom (`out << element`). You can also request the construction of a minified string version (`simdjson::minify(element)`) or a prettified string version (`simdjson::prettify(element)`). Numbers are serialized as 64-bit floating-point numbers (`double`).
+* **Output to streams and strings:** Given a document or an element (or node) out of a JSON document, you can output a minified string version using the C++ stream idiom (`out << element`). You can also request the construction of a minified string version (`simdjson::minify(element)`) or a prettified string version (`simdjson::prettify(element)`). For the prettified version, you can also specify the number of spaces for each level of indentation (`simdjson::prettify(element, 2)`); the default is 4. An indentation step less than or equal to zero inserts newlines without indentation. Numbers are serialized as 64-bit floating-point numbers (`double`).
 
 ### Examples
 
@@ -426,7 +426,7 @@ JSONPath
 ------------
 
 
-The simdjson library supports a subset of [JSONPath](https://www.rfc-editor.org/rfc/rfc9535) (RFC 9535) through the `at_path()` method, allowing you to reach further into the document in a single call. The subset of JSONPath that is implemented is the subset that is trivially convertible into the JSON Pointer format, using `.` to access a field and `[]` to access a specific index.
+The simdjson library supports a subset of [JSONPath](https://www.rfc-editor.org/rfc/rfc9535) (RFC 9535) through the `at_path()` method, allowing you to reach further into the document in a single call. The subset of JSONPath that is implemented is the subset that is trivially convertible into the JSON Pointer format, using `.` or `['key']` to access a field and `[]` to access a specific index.
 
 Consider the following example:
 

@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       leg:
-        description: 'Single platform to run: ubuntu or macos (leave empty for both)'
+        description: 'Single leg to run: avx512 or neon (leave empty for all)'
         required: false
         default: ''
       attempt:
@@ -25,7 +25,7 @@ jobs:
       contents: read
     strategy:
       matrix:
-        leg: [ubuntu, macos]
+        leg: [avx512, neon]
 
     steps:
       - name: Dispatch ${{ matrix.leg }} as its own run
@@ -40,8 +40,8 @@ jobs:
 
   build:
     if: inputs.leg != ''
-    runs-on: ${{ inputs.leg == 'ubuntu' && 'ubuntu-latest' || 'macos-latest' }}
-    container: ${{ inputs.leg == 'ubuntu' && 'gcc:16' || '' }}
+    runs-on: ${{ inputs.leg == 'neon' && 'macos-latest' || 'ubuntu-latest' }}
+    container: ${{ inputs.leg != 'neon' && 'gcc:16' || '' }}
     name: Benchmark on ${{ inputs.leg }} GCC
     outputs:
       rejected: ${{ steps.cpu.outputs.rejected }}
@@ -55,27 +55,32 @@ jobs:
         recipe_book_benchmark/benchmark_parsing_recipe_book
 
     steps:
-      - name: Reject runners without the wanted CPU (M2 Pro on macOS, AVX-512 on Linux)
+      - name: Reject non-target CPU runners (EPYC 9V45 for avx512, no M1 for neon)
         id: cpu
         shell: bash
         env:
           ATTEMPT: ${{ inputs.attempt }}
+          LEG: ${{ inputs.leg }}
         run: |
-          if [ "$RUNNER_OS" = "macOS" ]; then
-            CPU=$(sysctl -n machdep.cpu.brand_string)
-            WANTED=false
-            [[ "$CPU" == *"M2 Pro"* ]] && WANTED=true
-          else
-            CPU=$(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- | sed 's/^ *//')
-            WANTED=false
-            grep -qw avx512f /proc/cpuinfo && WANTED=true
-          fi
+          WANTED=false
+          case "$LEG" in
+            avx512)
+              CPU=$(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2-)
+              CPU=$(echo "$CPU" | sed 's/^ *//;s/ *$//')
+              [[ "$CPU" == *"AMD EPYC 9V45 96-Core Processor"* ]] && WANTED=true
+              ;;
+            neon)
+              CPU=$(sysctl -n machdep.cpu.brand_string)
+              [[ "$CPU" != *M1* ]] && WANTED=true
+              ;;
+          esac
           echo "CPU: $CPU"
           if [ "$WANTED" != "true" ]; then
             echo "rejected=true" >> "$GITHUB_OUTPUT"
             echo "Landed on $CPU on attempt $ATTEMPT, aborting so this leg reruns on a different runner." >&2
             exit 1
           fi
+          echo "rejected=false" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v6
 
@@ -134,7 +139,7 @@ jobs:
   Relaunch-Leg:
     runs-on: ubuntu-latest
     needs: build
-    if: always() && needs.build.outputs.rejected == 'true' && fromJSON(inputs.attempt) < 100
+    if: always() && inputs.leg != '' && needs.build.outputs.rejected != 'false' && contains(fromJSON('["failure","cancelled"]'), needs.build.result) && fromJSON(inputs.attempt) < 100
     permissions:
       actions: write
       contents: read

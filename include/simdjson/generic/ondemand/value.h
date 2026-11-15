@@ -26,8 +26,13 @@ public:
    * Create a new invalid value.
    *
    * Exists so you can declare a variable and later assign to it before use.
+   *
+   * It is user-provided (not = default) on purpose: value-initialization (std::pair, T{})
+   * then skips zeroing the whole object, which led GCC 15 and 16 to keep
+   * simdjson_result<field> on the stack when iterating over objects, causing
+   * store-forwarding stalls (up to 2x slower).
    */
-  simdjson_inline value() noexcept = default;
+  simdjson_inline value() noexcept {}
 
   /**
    * Get this value as the given type.
@@ -892,7 +897,7 @@ struct simdjson_result<SIMDJSON_IMPLEMENTATION::ondemand::value> : public SIMDJS
 public:
   simdjson_inline simdjson_result(SIMDJSON_IMPLEMENTATION::ondemand::value &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   simdjson_inline simdjson_result<SIMDJSON_IMPLEMENTATION::ondemand::array> get_array() noexcept;
   simdjson_inline simdjson_result<SIMDJSON_IMPLEMENTATION::ondemand::object> get_object() noexcept;
