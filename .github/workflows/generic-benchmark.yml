@@ -1,0 +1,193 @@
+name: Generic Benchmark
+run-name: ${{ inputs.leg && format('{0} attempt {1}', inputs.leg, inputs.attempt) || github.event.head_commit.message || github.workflow }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      leg:
+        description: 'Single leg to run: avx512-gcc, avx512-clang, avx512-msvc, neon-gcc or neon-clang (leave empty for all)'
+        required: false
+        default: ''
+      attempt:
+        description: 'Attempt number of this leg'
+        required: false
+        default: '1'
+  push:
+    branches:
+      - add_jsonifier_generic_new
+
+jobs:
+  Dispatch-Legs:
+    runs-on: ubuntu-latest
+    if: inputs.leg == ''
+    permissions:
+      actions: write
+      contents: read
+    strategy:
+      matrix:
+        leg: [avx512-gcc, avx512-clang, avx512-msvc, neon-gcc, neon-clang]
+
+    steps:
+      - name: Dispatch ${{ matrix.leg }} as its own run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh workflow run generic-benchmark.yml
+          --repo "$GITHUB_REPOSITORY"
+          --ref "$GITHUB_REF_NAME"
+          -f leg=${{ matrix.leg }}
+          -f attempt=1
+
+  build:
+    if: inputs.leg != ''
+    runs-on: ${{ startsWith(inputs.leg, 'neon') && 'macos-latest' || inputs.leg == 'avx512-msvc' && 'windows-latest' || 'ubuntu-latest' }}
+    container: ${{ inputs.leg == 'avx512-gcc' && 'gcc:16' || '' }}
+    name: Benchmark on ${{ inputs.leg }}
+    outputs:
+      rejected: ${{ steps.cpu.outputs.rejected }}
+
+    env:
+      BENCHMARK_FILTER: '<(simdjson_ondemand|jsonifier_generic)'
+
+    steps:
+      - name: Reject non-target CPU runners (EPYC 9V45 for every avx512 leg, no M1 for neon)
+        id: cpu
+        shell: bash
+        env:
+          ATTEMPT: ${{ inputs.attempt }}
+          LEG: ${{ inputs.leg }}
+        run: |
+          WANTED=false
+          case "$LEG" in
+            avx512-gcc|avx512-clang)
+              CPU=$(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2-)
+              CPU=$(echo "$CPU" | sed 's/^ *//;s/ *$//')
+              [[ "$CPU" == *"AMD EPYC 9V45 96-Core Processor"* ]] && WANTED=true
+              ;;
+            avx512-msvc)
+              CPU=$(powershell -NoProfile -Command "(Get-CimInstance Win32_Processor | Select-Object -First 1).Name" | tr -d '\r' | sed 's/^ *//;s/ *$//')
+              [[ "$CPU" == *"AMD EPYC 9V45 96-Core Processor"* ]] && WANTED=true
+              ;;
+            neon-gcc|neon-clang)
+              CPU=$(sysctl -n machdep.cpu.brand_string)
+              [[ "$CPU" != *M1* ]] && WANTED=true
+              ;;
+          esac
+          echo "CPU: $CPU"
+          if [ "$WANTED" != "true" ]; then
+            echo "rejected=true" >> "$GITHUB_OUTPUT"
+            echo "Landed on $CPU on attempt $ATTEMPT, aborting so this leg reruns on a different runner." >&2
+            exit 1
+          fi
+          echo "rejected=false" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v6
+
+      - name: Setup GCC (Linux)
+        if: inputs.leg == 'avx512-gcc'
+        run: |
+          apt-get -y update
+          apt-get -y --no-install-recommends install cmake ninja-build git
+          echo "CXX_BIN=$(command -v g++)" >> $GITHUB_ENV
+          echo "C_BIN=$(command -v gcc)" >> $GITHUB_ENV
+
+      - name: Setup Clang (Linux)
+        if: inputs.leg == 'avx512-clang'
+        run: |
+          set -euo pipefail
+          CODENAME=$(lsb_release -cs)
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/llvm.asc >/dev/null
+          echo "deb http://apt.llvm.org/${CODENAME}/ llvm-toolchain-${CODENAME} main" | sudo tee /etc/apt/sources.list.d/llvm-snapshot.list
+          sudo apt-get update
+          DEV_VERSION=$(grep -h '^Package: clang-[0-9]*$' /var/lib/apt/lists/apt.llvm.org_*_Packages | grep -oP 'clang-\K[0-9]+' | sort -nu | tail -1)
+          [ -n "$DEV_VERSION" ] || { echo "no clang in llvm apt lists"; exit 1; }
+          sudo apt-get install -y clang-$DEV_VERSION lld-$DEV_VERSION ninja-build
+          test -x /usr/bin/clang++-$DEV_VERSION
+          echo "CXX_BIN=/usr/bin/clang++-$DEV_VERSION" >> $GITHUB_ENV
+          echo "C_BIN=/usr/bin/clang-$DEV_VERSION" >> $GITHUB_ENV
+
+      - name: Setup MSVC (Windows)
+        if: inputs.leg == 'avx512-msvc'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Select MSVC compilers (Windows)
+        if: inputs.leg == 'avx512-msvc'
+        shell: pwsh
+        run: |
+          "CXX_BIN=cl" >> $env:GITHUB_ENV
+          "C_BIN=cl" >> $env:GITHUB_ENV
+
+      - name: Setup Clang (macOS)
+        if: inputs.leg == 'neon-clang'
+        run: |
+          brew install llvm ninja
+          echo "CXX_BIN=$(brew --prefix llvm)/bin/clang++" >> $GITHUB_ENV
+          echo "C_BIN=$(brew --prefix llvm)/bin/clang" >> $GITHUB_ENV
+
+      - name: Setup GCC (macOS)
+        if: inputs.leg == 'neon-gcc'
+        run: |
+          brew install gcc ninja
+          DEV_VERSION=$(ls "$(brew --prefix)/bin" | grep -E '^g\+\+-[0-9]+$' | sed 's/g++-//' | sort -n | tail -n 1)
+          [ -n "$DEV_VERSION" ] || { echo "no Homebrew g++ found"; exit 1; }
+          echo "CXX_BIN=$(brew --prefix)/bin/g++-$DEV_VERSION" >> $GITHUB_ENV
+          echo "C_BIN=$(brew --prefix)/bin/gcc-$DEV_VERSION" >> $GITHUB_ENV
+
+      - name: Configure CMake
+        run: >-
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_CXX_COMPILER=${{ env.CXX_BIN }}
+          -DCMAKE_C_COMPILER=${{ env.C_BIN }}
+          -DSIMDJSON_DEVELOPER_MODE=ON
+          -DSIMDJSON_COMPETITION=ON
+          -DBUILD_SHARED_LIBS=OFF
+
+      - name: Build
+        run: cmake --build build --config Release -v --target bench_ondemand
+
+      - name: Run
+        continue-on-error: true
+        shell: bash
+        run: |
+          mkdir -p results
+          case "$RUNNER_OS" in
+            macOS) sysctl -n machdep.cpu.brand_string hw.ncpu hw.memsize ;;
+            Windows) powershell -NoProfile -Command "Get-CimInstance Win32_Processor | Format-List Name,NumberOfCores,NumberOfLogicalProcessors" ;;
+            *) lscpu ;;
+          esac | tee results/cpu.txt
+          if [ "$CXX_BIN" = "cl" ]; then cl 2>&1 | head -n 1; else "$CXX_BIN" --version; fi | tee results/compiler.txt
+          ./build/benchmark/bench_ondemand \
+            --benchmark_filter="$BENCHMARK_FILTER" \
+            --benchmark_out=results/bench_ondemand.json \
+            --benchmark_out_format=json \
+            2>&1 | tee results/bench_ondemand.txt
+          grep -q 'jsonifier_generic' results/bench_ondemand.txt || { echo "::error::bench_ondemand ran without jsonifier_generic rows; the Jsonifier CMake block was skipped"; exit 1; }
+
+      - name: Upload results
+        if: always() && steps.cpu.outcome != 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: generic-${{ inputs.leg }}
+          path: results/
+
+  Relaunch-Leg:
+    runs-on: ubuntu-latest
+    needs: build
+    if: always() && inputs.leg != '' && needs.build.outputs.rejected != 'false' && contains(fromJSON('["failure","cancelled"]'), needs.build.result) && fromJSON(inputs.attempt) < 100
+    permissions:
+      actions: write
+      contents: read
+
+    steps:
+      - name: Dispatch ${{ inputs.leg }} again on a fresh runner
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LEG: ${{ inputs.leg }}
+          ATTEMPT: ${{ inputs.attempt }}
+        run: >-
+          gh workflow run generic-benchmark.yml
+          --repo "$GITHUB_REPOSITORY"
+          --ref "$GITHUB_REF_NAME"
+          -f leg="$LEG"
+          -f attempt=$(( ATTEMPT + 1 ))

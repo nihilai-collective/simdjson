@@ -6,7 +6,14 @@
 
 namespace json2msgpack {
 
-namespace jsonifier_api = ::jsonifier::generic;
+namespace jsonifier_api {
+using document = ::jsonifier::generic::generic_document<false>;
+using error_code = ::jsonifier::generic::parse_statuses;
+using object = ::jsonifier::generic::generic_object<false>;
+using array = ::jsonifier::generic::generic_array<false>;
+using field = ::jsonifier::generic::generic_field<false>;
+using value = ::jsonifier::generic::generic_value<false>;
+}
 
 class msgpack_string_buffer {
 public:
@@ -39,7 +46,7 @@ private:
   simdjson_inline void write_key(std::string_view key) noexcept;
   simdjson_inline bool write_string(const jsonifier_api::value &element);
   simdjson_inline bool write_element(const jsonifier_api::value &element);
-  inline bool write_container(const jsonifier_api::value &element, ::jsonifier::json_type type);
+  inline bool write_container(const jsonifier_api::value &element, ::jsonifier::json_types type);
 
   ::jsonifier::jsonifier_core<> parser{};
   uint8_t *buff{};
@@ -97,23 +104,23 @@ bool jsonifier2msgpack::write_string(const jsonifier_api::value &element) {
 }
 
 bool jsonifier2msgpack::write_element(const jsonifier_api::value &element) {
-  const ::jsonifier::json_type type = element.type();
+  const ::jsonifier::json_types type = element.type();
   switch (type) {
-  case ::jsonifier::json_type::string:
+  case ::jsonifier::json_types::string:
     return write_string(element);
-  case ::jsonifier::json_type::number: {
+  case ::jsonifier::json_types::number: {
     double value{};
     if (element.getDouble(value) != jsonifier_api::error_code::success) { return false; }
     write_double(value);
     return true;
   }
-  case ::jsonifier::json_type::boolean: {
+  case ::jsonifier::json_types::boolean: {
     bool value{};
     if (element.getBool(value) != jsonifier_api::error_code::success) { return false; }
     write_byte(uint8_t(0xc2 + value));
     return true;
   }
-  case ::jsonifier::json_type::null:
+  case ::jsonifier::json_types::null:
     if (!element.isNull()) { return false; }
     write_byte(0xc0);
     return true;
@@ -122,9 +129,9 @@ bool jsonifier2msgpack::write_element(const jsonifier_api::value &element) {
   }
 }
 
-bool jsonifier2msgpack::write_container(const jsonifier_api::value &element, ::jsonifier::json_type type) {
+bool jsonifier2msgpack::write_container(const jsonifier_api::value &element, ::jsonifier::json_types type) {
   uint32_t counter = 0;
-  if (type == ::jsonifier::json_type::array) {
+  if (type == ::jsonifier::json_types::array) {
     jsonifier_api::array array = element.getArray();
     write_byte(0xdd);
     uint8_t *location = skip_uint32();
@@ -135,7 +142,7 @@ bool jsonifier2msgpack::write_container(const jsonifier_api::value &element, ::j
     write_uint32_at(counter, location);
     return true;
   }
-  if (type == ::jsonifier::json_type::object) {
+  if (type == ::jsonifier::json_types::object) {
     jsonifier_api::object object = element.getObject();
     write_byte(0xdf);
     uint8_t *location = skip_uint32();

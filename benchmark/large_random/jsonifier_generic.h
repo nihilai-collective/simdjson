@@ -6,7 +6,14 @@
 
 namespace large_random {
 
-namespace jsonifier_api = ::jsonifier::generic;
+namespace jsonifier_api {
+using document = ::jsonifier::generic::generic_document<false>;
+using error_code = ::jsonifier::generic::parse_statuses;
+using object = ::jsonifier::generic::generic_object<false>;
+using array = ::jsonifier::generic::generic_array<false>;
+using field = ::jsonifier::generic::generic_field<false>;
+using value = ::jsonifier::generic::generic_value<false>;
+}
 
 struct jsonifier_generic {
   static constexpr diff_flags DiffFlags = diff_flags::NONE;
