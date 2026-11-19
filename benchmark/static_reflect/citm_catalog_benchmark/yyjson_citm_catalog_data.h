@@ -8,7 +8,8 @@
 
 // yyjson deserialization for CITM Catalog data
 // Matches C++ CitmCatalog struct (only events + performances)
-CitmCatalog yyjson_deserialize_citm(const std::string &json_str) {
+simdjson_really_inline CitmCatalog
+yyjson_deserialize_citm(const std::string &json_str) {
     CitmCatalog catalog;
 
     yyjson_doc *doc = yyjson_read(json_str.c_str(), json_str.size(), 0);
@@ -118,7 +119,8 @@ CitmCatalog yyjson_deserialize_citm(const std::string &json_str) {
 }
 
 // Helper to add optional string field
-static inline void yyjson_add_optional_str(yyjson_mut_doc *doc, yyjson_mut_val *obj,
+static simdjson_really_inline void
+yyjson_add_optional_str(yyjson_mut_doc *doc, yyjson_mut_val *obj,
                                            const char *key, const std::optional<std::string> &val) {
     if (val.has_value()) {
         yyjson_mut_obj_add_str(doc, obj, key, val->c_str());
@@ -129,7 +131,8 @@ static inline void yyjson_add_optional_str(yyjson_mut_doc *doc, yyjson_mut_val *
 
 // yyjson serialization for CITM Catalog data
 // Matches C++ CitmCatalog struct exactly (only events + performances)
-std::string yyjson_serialize_citm(const CitmCatalog &catalog) {
+simdjson_really_inline std::string
+yyjson_serialize_citm(const CitmCatalog &catalog) {
     yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
     yyjson_mut_val *root = yyjson_mut_obj(doc);
     yyjson_mut_doc_set_root(doc, root);

@@ -10,7 +10,8 @@
 using namespace rapidjson;
 
 // RapidJSON deserialization for simplified Twitter data
-TwitterData rapidjson_deserialize(const std::string& json_str) {
+simdjson_really_inline TwitterData
+rapidjson_deserialize(const std::string &json_str) {
     Document doc;
     doc.Parse(json_str.c_str());
 
@@ -77,7 +78,7 @@ TwitterData rapidjson_deserialize(const std::string& json_str) {
 }
 
 // RapidJSON serialization for simplified Twitter data
-std::string rapidjson_serialize(const TwitterData& data) {
+simdjson_really_inline std::string rapidjson_serialize(const TwitterData &data) {
     Document doc;
     doc.SetObject();
     Document::AllocatorType& allocator = doc.GetAllocator();

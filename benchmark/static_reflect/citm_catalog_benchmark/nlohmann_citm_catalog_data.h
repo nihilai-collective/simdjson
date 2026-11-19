@@ -9,7 +9,7 @@
 using json = nlohmann::json;
 
 // ---- CITMPrice ----
-inline void to_json(json &j, const CITMPrice &p) {
+simdjson_really_inline void to_json(json &j, const CITMPrice &p) {
     j = json{
       {"amount", p.amount},
       {"audienceSubCategoryId", p.audienceSubCategoryId},
@@ -18,7 +18,7 @@ inline void to_json(json &j, const CITMPrice &p) {
 }
 
 // ---- CITMArea ----
-inline void to_json(json &j, const CITMArea &a) {
+simdjson_really_inline void to_json(json &j, const CITMArea &a) {
     j = json{
       {"areaId", a.areaId},
       {"blockIds", a.blockIds}
@@ -26,7 +26,7 @@ inline void to_json(json &j, const CITMArea &a) {
 }
 
 // ---- CITMSeatCategory ----
-inline void to_json(json &j, const CITMSeatCategory &s) {
+simdjson_really_inline void to_json(json &j, const CITMSeatCategory &s) {
     j = json{
       {"areas", s.areas},
       {"seatCategoryId", s.seatCategoryId}
@@ -34,7 +34,7 @@ inline void to_json(json &j, const CITMSeatCategory &s) {
 }
 
 // ---- CITMPerformance ----
-inline void to_json(json &j, const CITMPerformance &p) {
+simdjson_really_inline void to_json(json &j, const CITMPerformance &p) {
     j = json{
       {"id", p.id},
       {"eventId", p.eventId},
@@ -49,7 +49,7 @@ inline void to_json(json &j, const CITMPerformance &p) {
 }
 
 // ---- CITMEvent ----
-inline void to_json(json &j, const CITMEvent &e) {
+simdjson_really_inline void to_json(json &j, const CITMEvent &e) {
     j = json{
       {"id", e.id},
       {"name", e.name},
@@ -63,7 +63,7 @@ inline void to_json(json &j, const CITMEvent &e) {
 }
 
 // ---- CitmCatalog ----
-inline void to_json(json &j, const CitmCatalog &c) {
+simdjson_really_inline void to_json(json &j, const CitmCatalog &c) {
     j = json{
       {"events", c.events},
       {"performances", c.performances}
@@ -71,7 +71,8 @@ inline void to_json(json &j, const CitmCatalog &c) {
 }
 
 // Serialization function
-inline std::string nlohmann_serialize(const CitmCatalog &catalog) {
+simdjson_really_inline std::string
+nlohmann_serialize(const CitmCatalog &catalog) {
     json j = catalog;
     return j.dump();
 }

@@ -10,7 +10,8 @@
 using namespace rapidjson;
 
 // RapidJSON deserialization for CITM Catalog data
-CitmCatalog rapidjson_deserialize_citm(const std::string& json_str) {
+simdjson_really_inline CitmCatalog
+rapidjson_deserialize_citm(const std::string &json_str) {
     Document doc;
     doc.Parse(json_str.c_str());
 
@@ -98,7 +99,8 @@ CitmCatalog rapidjson_deserialize_citm(const std::string& json_str) {
 }
 
 // RapidJSON serialization for CITM Catalog data
-std::string rapidjson_serialize_citm(const CitmCatalog& catalog) {
+simdjson_really_inline std::string
+rapidjson_serialize_citm(const CitmCatalog &catalog) {
     Document doc;
     doc.SetObject();
     Document::AllocatorType& allocator = doc.GetAllocator();

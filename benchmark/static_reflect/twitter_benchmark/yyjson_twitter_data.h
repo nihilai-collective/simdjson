@@ -7,7 +7,8 @@
 #include <stdexcept>
 
 // yyjson deserialization for simplified Twitter data
-TwitterData yyjson_deserialize(const std::string &json_str) {
+simdjson_really_inline TwitterData
+yyjson_deserialize(const std::string &json_str) {
     TwitterData data;
 
     yyjson_doc *doc = yyjson_read(json_str.c_str(), json_str.size(), 0);
@@ -94,7 +95,7 @@ TwitterData yyjson_deserialize(const std::string &json_str) {
 }
 
 // yyjson serialization for simplified Twitter data
-std::string yyjson_serialize(const TwitterData &data) {
+simdjson_really_inline std::string yyjson_serialize(const TwitterData &data) {
     yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
     yyjson_mut_val *root = yyjson_mut_obj(doc);
     yyjson_mut_doc_set_root(doc, root);

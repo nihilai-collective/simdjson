@@ -5,7 +5,7 @@
 #include <nlohmann/json.hpp>
 
 // Serialization functions for nlohmann
-void to_json(nlohmann::json &j, const User &u) {
+simdjson_really_inline void to_json(nlohmann::json &j, const User &u) {
   j = nlohmann::json{{"id", u.id},
                      {"name", u.name},
                      {"screen_name", u.screen_name},
@@ -17,7 +17,7 @@ void to_json(nlohmann::json &j, const User &u) {
                      {"statuses_count", u.statuses_count}};
 }
 
-void to_json(nlohmann::json &j, const Status &s) {
+simdjson_really_inline void to_json(nlohmann::json &j, const Status &s) {
   j = nlohmann::json{{"created_at", s.created_at},
                      {"id", s.id},
                      {"text", s.text},
@@ -26,12 +26,12 @@ void to_json(nlohmann::json &j, const Status &s) {
                      {"favorite_count", s.favorite_count}};
 }
 
-void to_json(nlohmann::json &j, const TwitterData &t) {
+simdjson_really_inline void to_json(nlohmann::json &j, const TwitterData &t) {
   j = nlohmann::json{{"statuses", t.statuses}};
 }
 
 // Deserialization functions for nlohmann
-void from_json(const nlohmann::json &j, User &u) {
+simdjson_really_inline void from_json(const nlohmann::json &j, User &u) {
   j.at("id").get_to(u.id);
   j.at("name").get_to(u.name);
   j.at("screen_name").get_to(u.screen_name);
@@ -43,7 +43,7 @@ void from_json(const nlohmann::json &j, User &u) {
   j.at("statuses_count").get_to(u.statuses_count);
 }
 
-void from_json(const nlohmann::json &j, Status &s) {
+simdjson_really_inline void from_json(const nlohmann::json &j, Status &s) {
   j.at("created_at").get_to(s.created_at);
   j.at("id").get_to(s.id);
   j.at("text").get_to(s.text);
@@ -52,17 +52,18 @@ void from_json(const nlohmann::json &j, Status &s) {
   j.at("favorite_count").get_to(s.favorite_count);
 }
 
-void from_json(const nlohmann::json &j, TwitterData &t) {
+simdjson_really_inline void from_json(const nlohmann::json &j, TwitterData &t) {
   j.at("statuses").get_to(t.statuses);
 }
 
 // Helper functions for benchmarking
-std::string nlohmann_serialize(const TwitterData &data) {
+simdjson_really_inline std::string nlohmann_serialize(const TwitterData &data) {
   nlohmann::json j = data;
   return j.dump();
 }
 
-TwitterData nlohmann_deserialize(const std::string &json_str) {
+simdjson_really_inline TwitterData
+nlohmann_deserialize(const std::string &json_str) {
   nlohmann::json j = nlohmann::json::parse(json_str);
   return j.get<TwitterData>();
 }
