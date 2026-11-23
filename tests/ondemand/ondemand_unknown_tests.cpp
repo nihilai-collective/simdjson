@@ -9,13 +9,21 @@ using namespace simdjson;
 namespace unknown_tests {
   using namespace std;
 
+#if SIMDJSON_ENABLE_NAN_INF
+  constexpr simdjson::ondemand::json_type NAN_TYPE = simdjson::ondemand::json_type::number;
+  const char *const NAN_TYPE_NAME = "number";
+#else
+  constexpr simdjson::ondemand::json_type NAN_TYPE = simdjson::ondemand::json_type::unknown;
+  const char *const NAN_TYPE_NAME = "unknown";
+#endif
+
   bool root_value_type() {
     TEST_START();
     padded_string json = "NaN"_padded;
     ASSERT_TRUE(test_ondemand_doc(json, [&](auto doc_result) {
         simdjson::ondemand::json_type type;
         ASSERT_SUCCESS( doc_result.type().get(type) );
-        ASSERT_EQUAL( type, simdjson::ondemand::json_type::unknown );
+        ASSERT_EQUAL( type, NAN_TYPE );
         std::string_view str;
         ASSERT_SUCCESS( doc_result.raw_json_token().get(str) );
         ASSERT_EQUAL( str, "NaN");
@@ -31,7 +39,7 @@ namespace unknown_tests {
         ASSERT_SUCCESS( doc_result.type().get(type) );
         std::ostringstream os;
         os << type;
-        ASSERT_EQUAL( os.str(), "unknown" );
+        ASSERT_EQUAL( os.str(), NAN_TYPE_NAME );
         return true;
     }));
     TEST_SUCCEED();
@@ -46,7 +54,11 @@ namespace unknown_tests {
         simdjson::ondemand::json_type type;
         auto val = object["key"];
         ASSERT_SUCCESS( val.type().get(type) );
+#if SIMDJSON_ENABLE_NAN_INF
+        ASSERT_EQUAL( type, simdjson::ondemand::json_type::number );
+#else
         ASSERT_EQUAL( type, simdjson::ondemand::json_type::unknown );
+#endif
         double num = 0.0;
 #if SIMDJSON_ENABLE_NAN_INF
         ASSERT_SUCCESS( val.get(num) );

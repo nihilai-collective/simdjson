@@ -1027,6 +1027,60 @@ namespace number_tests {
     TEST_SUCCEED();
   }
 
+  bool root_number_rs_outside_stream() {
+    TEST_START();
+    // Outside of a json_sequence stream, RS (0x1E) is not a separator. Some
+    // kernels keep it in the number token: it must not be trimmed away.
+    const std::string inputs[] = {std::string("1\x1e"), std::string("-12\x1e "),
+                                  std::string("1.5\x1e"), std::string("7\x1e\x1e")};
+    simdjson::ondemand::parser parser;
+    simdjson::ondemand::document doc;
+    int64_t i;
+    uint64_t u;
+    double d;
+    simdjson::ondemand::number num;
+    for (const std::string &input : inputs) {
+      simdjson::padded_string json(input);
+      ASSERT_SUCCESS(parser.iterate(json).get(doc));
+      ASSERT_TRUE(doc.get_int64().get(i) != SUCCESS);
+      ASSERT_SUCCESS(parser.iterate(json).get(doc));
+      ASSERT_TRUE(doc.get_uint64().get(u) != SUCCESS);
+      ASSERT_SUCCESS(parser.iterate(json).get(doc));
+      ASSERT_TRUE(doc.get_double().get(d) != SUCCESS);
+      ASSERT_SUCCESS(parser.iterate(json).get(doc));
+      ASSERT_TRUE(doc.get_number().get(num) != SUCCESS);
+    }
+    TEST_SUCCEED();
+  }
+
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  bool root_number_rs_incomplete_json() {
+    TEST_START();
+    // iterate_allow_incomplete_json() sets _streaming on a root scalar.
+    // RS (0x1E) is not a separator on that path.
+    const std::string inputs[] = {std::string("1\x1e"), std::string("-12\x1e "),
+                                  std::string("1.5\x1e"), std::string("7\x1e\x1e")};
+    simdjson::ondemand::parser parser;
+    simdjson::ondemand::document doc;
+    int64_t i;
+    uint64_t u;
+    double d;
+    simdjson::ondemand::number num;
+    for (const std::string &input : inputs) {
+      simdjson::padded_string json(input);
+      ASSERT_SUCCESS(parser.iterate_allow_incomplete_json(json).get(doc));
+      ASSERT_TRUE(doc.get_int64().get(i) != SUCCESS);
+      ASSERT_SUCCESS(parser.iterate_allow_incomplete_json(json).get(doc));
+      ASSERT_TRUE(doc.get_uint64().get(u) != SUCCESS);
+      ASSERT_SUCCESS(parser.iterate_allow_incomplete_json(json).get(doc));
+      ASSERT_TRUE(doc.get_double().get(d) != SUCCESS);
+      ASSERT_SUCCESS(parser.iterate_allow_incomplete_json(json).get(doc));
+      ASSERT_TRUE(doc.get_number().get(num) != SUCCESS);
+    }
+    TEST_SUCCEED();
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+
   // Checks get_double(), get_float() and their _in_string variants, at the
   // root and inside an array.
   bool check_long_exponent(const std::string &number, double expected, error_code expected_error = SUCCESS) {
@@ -1080,8 +1134,67 @@ namespace number_tests {
     TEST_SUCCEED();
   }
 
+  // parse_integer_digits reads 8 bytes at once and has a separate path for up to
+  // 7 digits, so try every digit count and what may follow 7 and 8 digits.
+  bool integer_digit_counts() {
+    TEST_START();
+    ondemand::parser parser;
+    ondemand::document doc;
+    uint64_t u;
+    int64_t s;
+
+    for (std::string pattern : {"1234567890123456789", "9999999999999999999"}) {
+      uint64_t expected = 0;
+      for (size_t count = 1; count <= pattern.size(); count++) {
+        expected = expected * 10 + uint64_t(pattern[count - 1] - '0');
+        const std::string digits = pattern.substr(0, count);
+
+        padded_string root(digits);
+        ASSERT_SUCCESS(parser.iterate(root).get(doc));
+        ASSERT_SUCCESS(doc.get_uint64().get(u));
+        ASSERT_EQUAL(u, expected);
+
+        // Followed by ',' and by ']'. 19 nines don't fit an int64_t.
+        padded_string array("[" + digits + ",-" + digits + "]");
+        ASSERT_SUCCESS(parser.iterate(array).get(doc));
+        ASSERT_SUCCESS(doc.at_pointer("/0").get_uint64().get(u));
+        ASSERT_EQUAL(u, expected);
+        if (count < 19) {
+          ASSERT_SUCCESS(doc.at_pointer("/0").get_int64().get(s));
+          ASSERT_EQUAL(s, int64_t(expected));
+          ASSERT_SUCCESS(doc.at_pointer("/1").get_int64().get(s));
+          ASSERT_EQUAL(s, -int64_t(expected));
+        }
+      }
+    }
+
+    const std::pair<std::string_view, error_code> errors[] = {
+      {"[-]", INCORRECT_TYPE},
+      {"[01]", NUMBER_ERROR},
+      {"[01234567]", NUMBER_ERROR},
+      {"[1234567.5]", INCORRECT_TYPE},
+      {"[12345678.5]", INCORRECT_TYPE},
+      {"[1234567e3]", INCORRECT_TYPE},
+      {"[12345678e3]", INCORRECT_TYPE},
+      {"[1234567a]", NUMBER_ERROR},
+      {"[12345678a]", NUMBER_ERROR},
+      {"[123456789012345a]", NUMBER_ERROR},
+      {"[1234567890123456a]", NUMBER_ERROR},
+      {"[12345678901234567a]", NUMBER_ERROR},
+      {"[1234567890123456.5]", INCORRECT_TYPE},
+      {"[123456789012345678901]", INCORRECT_TYPE},
+    };
+    for (const auto &[json, error] : errors) {
+      padded_string padded(json);
+      ASSERT_SUCCESS(parser.iterate(padded).get(doc));
+      ASSERT_ERROR(doc.at_pointer("/0").get_uint64().get(u), error);
+    }
+    TEST_SUCCEED();
+  }
+
   bool run() {
-    return get_int32_values() &&
+    return integer_digit_counts() &&
+           get_int32_values() &&
            get_uint32_values() &&
            get_uint16_values() &&
            get_int16_values() &&
@@ -1108,6 +1221,10 @@ namespace number_tests {
            root_number_scratch_padding() &&
            root_number_trailing_whitespace() &&
            root_number_stream_delimiters() &&
+           root_number_rs_outside_stream() &&
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+           root_number_rs_incomplete_json() &&
+#endif
            long_exponents();
   }
 

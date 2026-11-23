@@ -12,10 +12,9 @@ namespace internal {
  * @private
  * Scratch capacity that every caller of to_chars must provide.
  *
- * The emitted decimal is at most ~24 characters, but dragonbox() and
- * format_buffer() intentionally write past the logical end with fixed-size
- * 16/17-byte memcpy/memset operations so the compiler can inline them (no
- * libc mem* dispatch with size-class branches). The extra bytes are required
+ * The emitted decimal is at most ~24 characters, but to_chars() intentionally
+ * writes past the logical end with fixed-size 8- and 16-byte stores, so that
+ * the layout needs no length-dependent branches. The extra bytes are required
  * for safety of those over-writes; do not shrink this below 40.
  * See src/to_chars.cpp and #2805.
  */
@@ -60,6 +59,10 @@ float from_chars_float(const char *first) noexcept;
 
 #ifndef SIMDJSON_ENABLE_NAN_INF
 #define SIMDJSON_ENABLE_NAN_INF 0
+#endif
+
+#ifndef SIMDJSON_ALLOW_TRAILING_COMMAS
+#define SIMDJSON_ALLOW_TRAILING_COMMAS 0
 #endif
 
 } // namespace simdjson
@@ -398,5 +401,24 @@ namespace std {
 #define simdjson_lifetime_bound [[lifetimebound]]
 #else
 #define simdjson_lifetime_bound
+#endif
+
+// C++26 (P2795R5) and -ftrivial-auto-var-init zero-fill local variables that
+// have no initializer. simdjson_indeterminate opts a local out of that. Use it
+// only on buffers that the code writes before it reads them.
+#if defined(SIMDJSON_CPLUSPLUS26) && defined(__has_cpp_attribute)
+#if __has_cpp_attribute(indeterminate)
+#define simdjson_indeterminate [[indeterminate]]
+#endif
+#endif
+
+#if !defined(simdjson_indeterminate) && defined(__has_attribute)
+#if __has_attribute(uninitialized)
+#define simdjson_indeterminate __attribute__((uninitialized))
+#endif
+#endif
+
+#ifndef simdjson_indeterminate
+#define simdjson_indeterminate
 #endif
 #endif // SIMDJSON_COMMON_DEFS_H

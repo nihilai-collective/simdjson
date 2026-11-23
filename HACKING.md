@@ -220,6 +220,13 @@ Other important files and directories:
   ./benchmark/bench_parse_call
   ```
   The last line becomes `./benchmark/Release/bench_parse_call.exe` under Windows. Under Windows, you can also build with the clang compiler by adding `-T ClangCL` to the call to `cmake ..`: `cmake -T ClangCL ..`.
+  Other Google Benchmark targets cover specific code paths. Select cases with `--benchmark_filter`:
+  - `bench_small_documents`: many tiny documents (single numbers or atoms, short strings, objects, arrays), DOM and On-Demand;
+  - `bench_stream_formats`: `parse_many`/`iterate_many` in every stream format, including white space between documents and small batches;
+  - `bench_number_serialization`: `string_builder::append` of integers and floating-point values, and `to_string` of number-heavy DOM documents;
+  - `bench_builder_arrays` (C++20): `string_builder::append` and `to_json` of integer, floating-point and string arrays;
+  - `bench_from` (C++20): `simdjson::from<T>()` on scalars, strings and flat arrays, next to On-Demand;
+  - `bench_vector_deserialize` (C++20): `get<std::vector<T>>()` for trivial types, strings and user-defined types.
 * **fuzz:** The source for fuzz testing. This lets us explore important edge and middle cases
 * **fuzz:** The source for fuzz testing. This lets us explore important edge and middle cases
   automatically, and is run in CI.
@@ -231,11 +238,9 @@ Other important files and directories:
 * **jsonexamples:** A wide spread of useful, real-world JSON files with different characteristics
   and sizes.
 * **test:** The tests are here. basictests.cpp and errortests.cpp are the primary ones.
-* **tools:** Source for executables that can be distributed with simdjson. Some examples:
-  * `json2json mydoc.json` parses the document, constructs a model and then dumps back the result to standard output.
-  * `json2json -d mydoc.json` parses the document, constructs a model and then dumps model (as a tape) to standard output. The tape format is described in the accompanying file `tape.md`.
-  * `minify mydoc.json` minifies the JSON document, outputting the result to standard output. Minifying means to remove the unneeded white space characters.
-  * `jsonpointer mydoc.json <jsonpath> <jsonpath> ... <jsonpath>` parses the document, constructs a model and then processes a series of [JSON Pointer paths](https://tools.ietf.org/html/rfc6901). The result is itself a JSON document.
+* **tools:** Source for the `sjmin` command-line tool, which minifies a JSON document
+  (`sjmin mydoc.json`). Its manual page is `man/sjmin.1`. It is built in developer mode,
+  or with `-D SIMDJSON_BUILD_TOOLS=ON`, which also installs it with its manual page.
 
 
 > **Don't modify the files in singleheader/ directly; these are automatically generated.**
@@ -403,6 +408,17 @@ Furthermore, if you have installed LLVM clang on Windows, for example as a compo
 - `cd build`
 - `cmake -T ClangCL ..`
 - `cmake --build . --config Release`
+
+### The `max` and `min` macros
+
+The `<windows.h>` header defines `max` and `min` as function-like macros unless `NOMINMAX` is defined. Users include it before simdjson, and some of our tests and tools include it too. Yes, it was a bad move on Microsoft's part, but we need to live with it. A call such as `std::numeric_limits<uint64_t>::max()` or `std::max(a, b)` is then expanded by the preprocessor and fails to compile (MSVC: `C4003`, `C2589`; clang-cl: `too few arguments provided to function-like macro invocation`). Put the name in parentheses so that it is not a macro invocation:
+
+```cpp
+uint64_t m = (std::numeric_limits<uint64_t>::max)();
+size_t n = (std::min)(a, b);
+```
+
+This applies to the public headers, the sources, the tests, and the benchmarks. Non-Windows builds do not catch the mistake. To check locally, compile with `-include` a file that defines `#define max(a,b) (((a)>(b))?(a):(b))` and the same for `min`.
 
 ## Various References
 

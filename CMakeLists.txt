@@ -12,7 +12,7 @@ endif()
 project(
     simdjson
     # The version number is modified by tools/release.py
-    VERSION 5.2.0
+    VERSION 5.3.0
     DESCRIPTION "Parsing gigabytes of JSON per second"
     HOMEPAGE_URL "https://simdjson.org/"
     LANGUAGES CXX C
@@ -29,8 +29,8 @@ string(
 # ---- Options, variables ----
 
 # These version numbers are modified by tools/release.py
-set(SIMDJSON_LIB_VERSION "37.0.0" CACHE STRING "simdjson library version")
-set(SIMDJSON_LIB_SOVERSION "37" CACHE STRING "simdjson library soversion")
+set(SIMDJSON_LIB_VERSION "38.0.0" CACHE STRING "simdjson library version")
+set(SIMDJSON_LIB_SOVERSION "38" CACHE STRING "simdjson library soversion")
 
 option(SIMDJSON_BUILD_STATIC_LIB "Build simdjson_static library along with simdjson (only makes sense if BUILD_SHARED_LIBS=ON)" OFF)
 if(SIMDJSON_BUILD_STATIC_LIB AND NOT BUILD_SHARED_LIBS)
@@ -358,6 +358,12 @@ if(SIMDJSON_ENABLE_NAN_INF)
   simdjson_add_props(target_compile_definitions PUBLIC SIMDJSON_ENABLE_NAN_INF=1)
 endif()
 
+option(SIMDJSON_ALLOW_TRAILING_COMMAS "Allow a comma before the closing bracket of an array or object (On-Demand)" OFF)
+if(SIMDJSON_ALLOW_TRAILING_COMMAS)
+  message(STATUS "simdjson trailing commas are allowed.")
+  simdjson_add_props(target_compile_definitions PUBLIC SIMDJSON_ALLOW_TRAILING_COMMAS=1)
+endif()
+
 # GCC and Clang have horrendous Debug builds when using SIMD.
 # A common fix is to use '-Og' instead.
 # bug https://gcc.gnu.org/bugzilla/show_bug.cgi?id=54412
@@ -499,6 +505,11 @@ elseif(SIMDJSON_DEVELOPER_MODE AND NOT is_top_project)
   message(AUTHOR_WARNING "Developer mode in simdjson is intended for the developers of simdjson")
 endif()
 
+option(SIMDJSON_BUILD_TOOLS "Build and install the sjmin command-line tool" OFF)
+if(SIMDJSON_BUILD_TOOLS AND NOT SIMDJSON_DEVELOPER_MODE)
+  add_subdirectory(tools)
+endif()
+
 if(NOT SIMDJSON_DEVELOPER_MODE)
   return()
 endif()
@@ -530,8 +541,8 @@ add_custom_target(all_tests)
 
 add_subdirectory(windows)
 include(cmake/CPM.cmake)
-add_subdirectory(dependencies) ## This needs to be before tools because of cxxopts
-add_subdirectory(tools)  ## This needs to be before tests because of cxxopts
+add_subdirectory(dependencies)
+add_subdirectory(tools) ## This needs to be before tests because of sjmin
 
 # Data: jsonexamples is left with only the bare essential.
 # most of the data has been moved to https://github.com/simdjson/simdjson-data

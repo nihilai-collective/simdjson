@@ -882,6 +882,44 @@ namespace document_stream_tests {
         TEST_SUCCEED();
     }
 
+    // The padding is digits and must not be parsed as part of the cut record.
+    bool json_sequence_truncated_last_record() {
+        TEST_START();
+        const std::string json("\x1e[5]\n\x1e[1");
+        std::vector<char> buffer(json.begin(), json.end());
+        buffer.resize(json.size() + SIMDJSON_PADDING, '0');
+        padded_string_view input(buffer.data(), json.size(), buffer.size());
+        {
+            ondemand::parser parser;
+            ondemand::document_stream stream;
+            ASSERT_SUCCESS( parser.iterate_many(input, 1000, stream_format::json_sequence).get(stream) );
+            auto i = stream.begin();
+            ASSERT_TRUE( i != stream.end() );
+            ondemand::document_reference doc;
+            ASSERT_SUCCESS( (*i).get(doc) );
+            int64_t x;
+            ASSERT_SUCCESS( doc.at(0).get_int64().get(x) );
+            ASSERT_EQUAL( x, 5 );
+            ++i;
+            ASSERT_TRUE( i == stream.end() );
+            ASSERT_EQUAL( stream.truncated_bytes(), 2 );
+        }
+        {
+            dom::parser parser;
+            dom::document_stream stream;
+            ASSERT_SUCCESS( parser.parse_many(input, 1000, stream_format::json_sequence).get(stream) );
+            auto i = stream.begin();
+            ASSERT_TRUE( i != stream.end() );
+            int64_t x;
+            ASSERT_SUCCESS( (*i).at(0).get_int64().get(x) );
+            ASSERT_EQUAL( x, 5 );
+            ++i;
+            ASSERT_FALSE( i != stream.end() );
+            ASSERT_EQUAL( stream.truncated_bytes(), 2 );
+        }
+        TEST_SUCCEED();
+    }
+
     // Visit every value, as an application dumping a document would, carrying on
     // after errors, and tell whether an error was found.
     void walk_ignoring_errors(ondemand::value v, int depth, bool &error_found) {
@@ -1031,7 +1069,9 @@ namespace document_stream_tests {
             {comma_prefix + R"([2[[")", ']', stream_format::comma_delimited},
             {R"([2[[")", ',', stream_format::comma_delimited},
             {comma_prefix + R"([2[[")", ',', stream_format::comma_delimited},
+#if !SIMDJSON_ALLOW_TRAILING_COMMAS
             {R"([1,] "a)", ',', stream_format::whitespace_delimited},
+#endif
             {R"([1,"x":2] "a)", ',', stream_format::whitespace_delimited}, // read with at(2)
         };
         for (const auto &c : cases) {
@@ -1118,6 +1158,74 @@ namespace document_stream_tests {
         }
         ASSERT_EQUAL(count, 4);
         ASSERT_EQUAL(stream.truncated_bytes(), 0);
+        TEST_SUCCEED();
+    }
+    // With batch_size 32, the second batch starts with white space and cuts a
+    // 26-byte string. The string fits in a batch that starts at its quote, as
+    // an array would: this is not a CAPACITY error. The fallback has its own
+    // stage 1, so we check every implementation that the system supports.
+    bool white_space_before_string_cut_by_batch() {
+        TEST_START();
+        std::string json = "\"a\"";
+        json.append(40, ' ').append("\"").append(24, 'x').append("\" \"b\"");
+        const padded_string input(json);
+        const size_t expected_index[] = {0, 43, 70};
+        const std::string expected_value[] = {"a", std::string(24, 'x'), "b"};
+        const implementation *active = get_active_implementation();
+        for (const implementation *impl : get_available_implementations()) {
+            if (!impl->supported_by_runtime_system()) { continue; }
+            get_active_implementation() = impl;
+            std::cout << "    " << impl->name() << std::endl;
+            ondemand::parser parser;
+            ondemand::document_stream stream;
+            ASSERT_SUCCESS(parser.iterate_many(input, 32).get(stream));
+            size_t count{0};
+            for (auto i = stream.begin(); i != stream.end(); ++i) {
+                ASSERT_TRUE(count < 3);
+                std::string_view value;
+                ASSERT_SUCCESS((*i).get_string().get(value));
+                ASSERT_EQUAL(value, expected_value[count]);
+                ASSERT_EQUAL(i.current_index(), expected_index[count]);
+                count++;
+            }
+            ASSERT_EQUAL(count, 3);
+            ASSERT_EQUAL(stream.truncated_bytes(), 0);
+        }
+        get_active_implementation() = active;
+        TEST_SUCCEED();
+    }
+    bool white_space_before_document_cut_by_comma_delimited_batch() {
+        TEST_START();
+        std::string quoted = "\"";
+        quoted.append(24, 'x').append("\"");
+        const std::string cut[] = {quoted, "[1,2,3,4,5,6,7,8,9,10,11]"};
+        for (const std::string &doc : cut) {
+            std::string json = "\"a\",";
+            json.append(40, ' ').append(doc).append(", \"b\"");
+            const padded_string input(json);
+            const implementation *active = get_active_implementation();
+            for (const implementation *impl : get_available_implementations()) {
+                if (!impl->supported_by_runtime_system()) { continue; }
+                get_active_implementation() = impl;
+                std::cout << "    " << impl->name() << std::endl;
+                ondemand::parser parser;
+                ondemand::document_stream stream;
+                ASSERT_SUCCESS(parser.iterate_many(input, 32, stream_format::comma_delimited).get(stream));
+                size_t count{0};
+                for (auto i = stream.begin(); i != stream.end(); ++i) {
+                    ASSERT_TRUE(count < 3);
+                    std::string_view raw;
+                    ASSERT_SUCCESS((*i).raw_json().get(raw));
+                    if (count == 1) {
+                        ASSERT_EQUAL(i.current_index(), 44);
+                        ASSERT_EQUAL(raw, doc);
+                    }
+                    count++;
+                }
+                ASSERT_EQUAL(count, 3);
+            }
+            get_active_implementation() = active;
+        }
         TEST_SUCCEED();
     }
     bool test_leading_spaces() {
@@ -3322,11 +3430,14 @@ bool run() {
             unfinished_document_at_batch_end() &&
             complete_document_before_next_batch_punctuation() &&
             json_sequence_unfinished_document_at_batch_end() &&
+            json_sequence_truncated_last_record() &&
             unbalanced_document_at_batch_end() &&
             stream_does_not_read_past_batch() &&
             small_window() &&
             large_window() &&
             whitespace_only_middle_batch() &&
+            white_space_before_string_cut_by_batch() &&
+            white_space_before_document_cut_by_comma_delimited_batch() &&
             test_leading_spaces() &&
             test_crazy_leading_spaces() &&
             adversarial_single_document() &&

@@ -37,6 +37,124 @@ inline void document::rewind() noexcept {
   static_cast<void>(iter.rewind());
 }
 
+simdjson_warn_unused simdjson_inline error_code document::validate() noexcept {
+  SIMDJSON_TRY(iter.rewind());
+  const bool check_trailing = !iter.streaming();
+  const uint8_t first = *iter.peek();
+  error_code error;
+  switch (first) {
+    case '{': case '[':
+      error = iter.validate_container();
+      break;
+    case '"':
+      error = get_root_value_iterator().get_root_string(check_trailing, false).error();
+      break;
+    case 't': case 'f':
+      error = get_root_value_iterator().get_root_bool(check_trailing).error();
+      break;
+    case 'n': {
+      bool null_value;
+      error = get_root_value_iterator().is_root_null(check_trailing).get(null_value);
+      if (!error && !null_value) { error = N_ATOM_ERROR; }
+#if SIMDJSON_ENABLE_NAN_INF
+      if (error && !get_root_value_iterator().get_root_double(check_trailing).error()) { error = SUCCESS; }
+#endif
+      break;
+    }
+    default:
+      error = get_root_value_iterator().get_root_double(check_trailing).error();
+      break;
+  }
+  // The root getters report a scalar of the wrong kind as INCORRECT_TYPE.
+  if (error == INCORRECT_TYPE) {
+    switch (first) {
+      case 't': error = T_ATOM_ERROR; break;
+      case 'f': error = F_ATOM_ERROR; break;
+      case 'n': error = N_ATOM_ERROR; break;
+      case '-': case '0': case '1': case '2': case '3': case '4':
+      case '5': case '6': case '7': case '8': case '9':
+        error = NUMBER_ERROR; break;
+      default: error = TAPE_ERROR; break;
+    }
+  }
+  static_cast<void>(iter.rewind());
+  return error;
+}
+
+template <typename V>
+simdjson_warn_unused simdjson_inline error_code document::visit(V &visitor) {
+  SIMDJSON_TRY(iter.rewind());
+  const error_code error = visit_root(visitor);
+  // The strings of the walk stay in the buffer, but an iteration may start from its beginning.
+  static_cast<void>(iter.rewind());
+  return error;
+}
+
+template <typename V>
+simdjson_warn_unused simdjson_inline error_code document::visit_root(V &visitor) {
+  const bool check_trailing = !iter.streaming();
+  const uint8_t *const first = iter.peek();
+  const char *const raw = reinterpret_cast<const char *>(first);
+  error_code error;
+  switch (*first) {
+    case '{': case '[':
+      return iter.visit_container(visitor, iter.position(), 0);
+    case '"': {
+      raw_json_string text;
+      error = get_root_value_iterator().get_root_raw_json_string(check_trailing).get(text);
+      if (!error) { return iter.visit_string(first, false, visitor); }
+      break;
+    }
+    case 't': case 'f': {
+      bool value;
+      error = get_root_value_iterator().get_root_bool(check_trailing).get(value);
+      if (!error) { return visitor.on_bool(value); }
+      break;
+    }
+    case 'n': {
+      bool null_value;
+      error = get_root_value_iterator().is_root_null(check_trailing).get(null_value);
+      if (!error && null_value) { return visitor.on_null(); }
+#if SIMDJSON_ENABLE_NAN_INF
+      double value;
+      if (!get_root_value_iterator().get_root_double(check_trailing).get(value)) { return visitor.on_double(value, raw); }
+#endif
+      if (!error) { error = N_ATOM_ERROR; }
+      break;
+    }
+    case '-': case '0': case '1': case '2': case '3': case '4':
+    case '5': case '6': case '7': case '8': case '9': {
+      number value;
+      error = get_root_value_iterator().get_root_number(check_trailing).get(value);
+      if (!error) { return json_iterator::visit_number(value, raw, visitor); }
+      break;
+    }
+#if SIMDJSON_ENABLE_NAN_INF
+    case 'N': case 'i': case 'I': {
+      double value;
+      error = get_root_value_iterator().get_root_double(check_trailing).get(value);
+      if (!error) { return visitor.on_double(value, raw); }
+      return error == TRAILING_CONTENT ? error : TAPE_ERROR;
+    }
+#endif
+    default:
+      return TAPE_ERROR;
+  }
+  // The root getters report a scalar of the wrong kind as INCORRECT_TYPE.
+  if (error == INCORRECT_TYPE) {
+    switch (*first) {
+      case 't': error = T_ATOM_ERROR; break;
+      case 'f': error = F_ATOM_ERROR; break;
+      case 'n': error = N_ATOM_ERROR; break;
+      case '-': case '0': case '1': case '2': case '3': case '4':
+      case '5': case '6': case '7': case '8': case '9':
+        error = NUMBER_ERROR; break;
+      default: error = TAPE_ERROR; break;
+    }
+  }
+  return error;
+}
+
 inline std::string document::to_debug_string() noexcept {
   return iter.to_string();
 }
@@ -591,6 +709,16 @@ simdjson_inline error_code simdjson_result<SIMDJSON_IMPLEMENTATION::ondemand::do
   first.rewind();
   return SUCCESS;
 }
+template <typename V>
+simdjson_warn_unused simdjson_inline error_code simdjson_result<SIMDJSON_IMPLEMENTATION::ondemand::document>::visit(V &visitor) {
+  if (error()) { return error(); }
+  return first.visit(visitor);
+}
+
+simdjson_warn_unused simdjson_inline error_code simdjson_result<SIMDJSON_IMPLEMENTATION::ondemand::document>::validate() noexcept {
+  if (error()) { return error(); }
+  return first.validate();
+}
 simdjson_inline simdjson_result<SIMDJSON_IMPLEMENTATION::ondemand::array_iterator> simdjson_result<SIMDJSON_IMPLEMENTATION::ondemand::document>::begin() & noexcept {
   if (error()) { return error(); }
   return first.begin();
@@ -933,6 +1061,7 @@ namespace ondemand {
 simdjson_inline document_reference::document_reference() noexcept : doc{nullptr} {}
 simdjson_inline document_reference::document_reference(document &d) noexcept : doc(&d) {}
 simdjson_inline void document_reference::rewind() noexcept { doc->rewind(); }
+simdjson_warn_unused simdjson_inline error_code document_reference::validate() noexcept { return doc->validate(); }
 simdjson_inline simdjson_result<array> document_reference::get_array() & noexcept { return doc->get_array(); }
 simdjson_inline simdjson_result<object> document_reference::get_object() & noexcept { return doc->get_object(); }
 /**
@@ -1096,6 +1225,10 @@ simdjson_inline error_code simdjson_result<SIMDJSON_IMPLEMENTATION::ondemand::do
   if (error()) { return error(); }
   first.rewind();
   return SUCCESS;
+}
+simdjson_warn_unused simdjson_inline error_code simdjson_result<SIMDJSON_IMPLEMENTATION::ondemand::document_reference>::validate() noexcept {
+  if (error()) { return error(); }
+  return first.validate();
 }
 simdjson_inline simdjson_result<SIMDJSON_IMPLEMENTATION::ondemand::array_iterator> simdjson_result<SIMDJSON_IMPLEMENTATION::ondemand::document_reference>::begin() & noexcept {
   if (error()) { return error(); }

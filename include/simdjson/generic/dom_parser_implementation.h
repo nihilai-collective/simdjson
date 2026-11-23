@@ -23,10 +23,6 @@ public:
   std::unique_ptr<open_container[]> open_containers{};
   /** Whether each open container is a [ or { */
   std::unique_ptr<bool[]> is_array{};
-  /** Buffer passed to stage 1 */
-  const uint8_t *buf{};
-  /** Length passed to stage 1 */
-  size_t len{0};
   /** Document passed to stage 2 */
   dom::document *doc{};
 
@@ -74,8 +70,8 @@ inline simdjson_warn_unused error_code dom_parser_implementation::set_capacity(s
   // implementation keeps its previous buffer and capacity. Otherwise a parser
   // that still believes it has room skips reallocation and stage 1 rejects
   // every document with CAPACITY.
-  std::unique_ptr<uint32_t[]> new_structural_indexes(new (std::nothrow) uint32_t[max_structures]);
-  if (!new_structural_indexes) { return MEMALLOC; }
+  internal::allocated_array<uint32_t> new_structural_indexes;
+  if (!new_structural_indexes.allocate(max_structures, allocator)) { return MEMALLOC; }
   structural_indexes = std::move(new_structural_indexes);
   structural_indexes[0] = 0;
   n_structural_indexes = 0;

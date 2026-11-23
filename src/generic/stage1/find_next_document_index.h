@@ -261,11 +261,9 @@ simdjson_inline uint32_t find_next_document_index_json_sequence(
   // Phase 2: Determine batch boundaries based on RS positions
 
   if (is_final) {
-    // Final batch: all documents are complete (last one ends at EOF).
-    // In json_sequence mode, RS markers define document boundaries, so all
-    // remaining structurals form complete documents. Return them all directly.
-    // (Calling find_next_document_index() would fail for scalar documents.)
-    return parser.n_structural_indexes;
+    // A cut number must not be parsed into padding the caller does not
+    // initialize. Leave that record to truncated_bytes(), as streaming_final does.
+    return find_next_document_index(parser);
   }
 
   // Partial batch: need to find complete documents only.
@@ -384,9 +382,13 @@ simdjson_inline uint32_t filter_comma_delimited(
   // A document ending with a root comma is complete.
   if (root_comma_count == 0) {
     // No root commas found; we cannot confirm any document is complete.
-    // The whole batch might be one incomplete document.
-    // Return DOCUMENT_TOO_LARGE if content was found (write_idx > 0), 0 if only commas.
-    return (parser.n_structural_indexes > 0) ? DOCUMENT_TOO_LARGE : 0;
+    // The whole batch might be one incomplete document. If white space comes
+    // before it, a batch that starts at the document may hold it.
+    if (parser.structural_indexes[0] > 0) {
+      next_batch_start = parser.structural_indexes[0];
+      return 0;
+    }
+    return DOCUMENT_TOO_LARGE;
   }
 
   // We have at least one root comma. Documents before the last comma are complete.

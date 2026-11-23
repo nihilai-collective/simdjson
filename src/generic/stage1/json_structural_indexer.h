@@ -42,9 +42,9 @@ public:
     * it tends to minimize the total number of instructions which is
     * beneficial.
     */
-  simdjson_inline void write_index(uint32_t idx, uint64_t& rev_bits, int i) {
+  simdjson_inline void write_index(uint32_t *dst, uint32_t idx, uint64_t& rev_bits, int i) {
     int lz = leading_zeroes(rev_bits);
-    this->tail[i] = static_cast<uint32_t>(idx) + lz;
+    dst[i] = static_cast<uint32_t>(idx) + lz;
     rev_bits = zero_leading_bit(rev_bits, lz);
   }
 #else
@@ -54,27 +54,27 @@ public:
     * algorithm can be competitive.
     */
 
-  simdjson_inline void write_index(uint32_t idx, uint64_t& bits, int i) {
-    this->tail[i] = idx + trailing_zeroes(bits);
+  simdjson_inline void write_index(uint32_t *dst, uint32_t idx, uint64_t& bits, int i) {
+    dst[i] = idx + trailing_zeroes(bits);
     bits = clear_lowest_bit(bits);
   }
 #endif // SIMDJSON_PREFER_REVERSE_BITS
 
   template <int START, int N>
-  simdjson_inline int write_indexes(uint32_t idx, uint64_t& bits) {
-    write_index(idx, bits, START);
+  simdjson_inline int write_indexes(uint32_t *dst, uint32_t idx, uint64_t& bits) {
+    write_index(dst, idx, bits, START);
     SIMDJSON_IF_CONSTEXPR (N > 1) {
-      write_indexes<(N-1>0?START+1:START), (N-1>=0?N-1:1)>(idx, bits);
+      write_indexes<(N-1>0?START+1:START), (N-1>=0?N-1:1)>(dst, idx, bits);
     }
     return START+N;
   }
 
   template <int START, int END, int STEP>
-  simdjson_inline int write_indexes_stepped(uint32_t idx, uint64_t& bits, int cnt) {
-    write_indexes<START, STEP>(idx, bits);
+  simdjson_inline int write_indexes_stepped(uint32_t *dst, uint32_t idx, uint64_t& bits, int cnt) {
+    write_indexes<START, STEP>(dst, idx, bits);
     SIMDJSON_IF_CONSTEXPR ((START+STEP)  < END) {
       if (simdjson_unlikely((START+STEP) < cnt)) {
-        write_indexes_stepped<(START+STEP<END?START+STEP:END), END, STEP>(idx, bits, cnt);
+        write_indexes_stepped<(START+STEP<END?START+STEP:END), END, STEP>(dst, idx, bits, cnt);
       }
     }
     return ((END-START) % STEP) == 0 ? END : (END-START) - ((END-START) % STEP) + STEP;
@@ -98,6 +98,7 @@ public:
     if (bits == 0)
         return;
 
+    uint32_t *dst = this->tail;
     int cnt = static_cast<int>(count_ones(bits));
 
 #if SIMDJSON_PREFER_REVERSE_BITS
@@ -110,16 +111,16 @@ public:
 #endif
     static constexpr const int STEP_UNTIL = 24;
 
-    write_indexes_stepped<0, STEP_UNTIL, STEP>(idx, bits, cnt);
+    write_indexes_stepped<0, STEP_UNTIL, STEP>(dst, idx, bits, cnt);
     SIMDJSON_IF_CONSTEXPR (STEP_UNTIL < 64) {
       if (simdjson_unlikely(STEP_UNTIL < cnt)) {
         for (int i=STEP_UNTIL; i<cnt; i++) {
-          write_index(idx, bits, i);
+          write_index(dst, idx, bits, i);
         }
       }
     }
 
-    this->tail += cnt;
+    this->tail = dst + cnt;
   }
 #endif // SIMDJSON_GENERIC_JSON_STRUCTURAL_INDEXER_CUSTOM_BIT_INDEXER
 
@@ -138,6 +139,8 @@ public:
   static error_code index(const uint8_t *buf, size_t len, dom_parser_implementation &parser, stage1_mode partial) noexcept;
 
 private:
+  template<size_t BLOCKS>
+  static error_code index_small(const uint8_t *buf, size_t len, dom_parser_implementation &parser) noexcept;
   simdjson_inline json_structural_indexer(uint32_t *structural_indexes);
   template<size_t STEP_SIZE>
   simdjson_inline void step(const uint8_t *block, buf_block_reader<STEP_SIZE> &reader) noexcept;
@@ -196,6 +199,15 @@ error_code json_structural_indexer::index(const uint8_t *buf, size_t len, dom_pa
   if (simdjson_unlikely(len > parser.capacity())) { return CAPACITY; }
   // We guard the rest of the code so that we can assume that len > 0 throughout.
   if (len == 0) { return EMPTY; }
+  // Lone atoms only on a complete (non-streaming) buffer. Streaming windows
+  // have different truncation and partial-scalar rules.
+  if (partial == stage1_mode::regular && len <= 64 && buf[0] != '{' && buf[0] != '[' && buf[0] != '"') {
+    error_code atom = simdjson::internal::try_stage1_lone_atom(parser, buf, len);
+    if (atom != UNINITIALIZED) { return atom; }
+  }
+  if (partial == stage1_mode::regular && !parser._unpadded && len <= 128) {
+    return len <= 64 ? index_small<1>(buf, len, parser) : index_small<2>(buf, len, parser);
+  }
   if (is_streaming(partial)) {
     len = trim_partial_utf8(buf, len);
     // If you end up with an empty window after trimming
@@ -212,11 +224,54 @@ error_code json_structural_indexer::index(const uint8_t *buf, size_t len, dom_pa
   }
   // Take care of the last block (will always be there unless file is empty which is
   // not supposed to happen.)
-  uint8_t block[STEP_SIZE];
+  simdjson_indeterminate uint8_t block[STEP_SIZE];
   const size_t remaining = parser._unpadded ? reader.get_remainder(block) : reader.get_remainder_padded(block);
   if (simdjson_unlikely(remaining == 0)) { return UNEXPECTED_ERROR; }
   indexer.step<STEP_SIZE>(block, reader);
   return indexer.finish(parser, reader.block_index(), len, partial);
+}
+
+// The error of a document that has an unclosed string, in regular mode.
+simdjson_never_inline error_code unclosed_string_error(const uint8_t *buf, size_t len, bool unescaped_chars, bool utf8_suspect) noexcept {
+  if (unescaped_chars) { return UNESCAPED_CHARS; }
+  if (utf8_suspect && !generic_validate_utf8<utf8_checker>(buf, trim_partial_utf8(buf, len))) { return UTF8_ERROR; }
+  return UNCLOSED_STRING;
+}
+
+// A document of at most 64 * BLOCKS bytes followed by SIMDJSON_PADDING bytes.
+// Same result as the block loop and finish() in regular mode.
+template<size_t BLOCKS>
+simdjson_inline error_code json_structural_indexer::index_small(const uint8_t *buf, size_t len, dom_parser_implementation &parser) noexcept {
+  json_structural_indexer indexer(parser.structural_indexes.get());
+  alignas(64) uint8_t block[64 * BLOCKS];
+  buf_block_reader<64 * BLOCKS> reader(buf, len);
+  reader.get_remainder_padded(block);
+  simd::simd8x64<uint8_t> in_1(block);
+  json_block block_1 = indexer.scanner.next(in_1);
+  SIMDJSON_IF_CONSTEXPR (BLOCKS == 1) {
+    indexer.next(in_1, block_1, 0);
+  } else {
+    simd::simd8x64<uint8_t> in_2(block + 64);
+    json_block block_2 = indexer.scanner.next(in_2);
+    indexer.next(in_1, block_1, 0);
+    indexer.next(in_2, block_2, 64);
+  }
+  indexer.indexer.write(uint32_t(64 * BLOCKS - 64), indexer.prev_structurals);
+  const error_code error = indexer.scanner.finish();
+  const uint32_t n = uint32_t(indexer.indexer.tail - parser.structural_indexes.get());
+  parser.n_structural_indexes = n;
+  parser.structural_indexes[n] = uint32_t(len);
+  parser.structural_indexes[n + 1] = uint32_t(len);
+  parser.structural_indexes[n + 2] = 0;
+  parser.next_structural_index = 0;
+  if (simdjson_unlikely(error != SUCCESS)) {
+    return unclosed_string_error(buf, len, indexer.unescaped_chars_error != 0, indexer.checker.errors() != SUCCESS);
+  }
+  if (indexer.unescaped_chars_error) { return UNESCAPED_CHARS; }
+  // The bytes past len are spaces: no index exceeds len, unlike in finish().
+  if (simdjson_unlikely(n == 0)) { return EMPTY; }
+  indexer.checker.check_eof();
+  return indexer.checker.errors();
 }
 
 template<>
@@ -324,8 +379,9 @@ simdjson_inline error_code json_structural_indexer::finish(dom_parser_implementa
     // will be the quote and we want to make sure to omit it.
     if(have_unclosed_string) {
       parser.n_structural_indexes--;
-      // a valid JSON file cannot have zero structural indexes - we should have found something
-      if (simdjson_unlikely(parser.n_structural_indexes == 0u)) { return CAPACITY; }
+      if (simdjson_unlikely(parser.n_structural_indexes == 0u)) {
+        return parser.structural_indexes[0] == 0 ? CAPACITY : EMPTY;
+      }
     }
     // We truncate the input to the end of the last complete document (or zero).
     const bool partial_scalar = !have_unclosed_string && ends_with_partial_scalar(parser, len);
@@ -422,7 +478,9 @@ simdjson_inline error_code json_structural_indexer::finish(dom_parser_implementa
     // Comma-delimited: filter root-level commas, use comma positions for batch boundaries
     if(have_unclosed_string) {
       parser.n_structural_indexes--;
-      if (simdjson_unlikely(parser.n_structural_indexes == 0u)) { return CAPACITY; }
+      if (simdjson_unlikely(parser.n_structural_indexes == 0u)) {
+        return parser.structural_indexes[0] == 0 ? CAPACITY : EMPTY;
+      }
     }
     uint32_t next_batch_start = uint32_t(len);
     auto new_structural_indexes = filter_comma_delimited(parser, len, false, next_batch_start);

@@ -15,5 +15,7 @@
 #include "simdjson/internal/dom_parser_implementation.h"
 #include "simdjson/internal/jsoncharutils_tables.h"
 #include "simdjson/internal/numberparsing_tables.h"
+#include "simdjson/internal/numberparsing.h"
 #include "simdjson/internal/simdprune_tables.h"
+#include "simdjson/internal/partial_load.h"
 #endif // SIMDJSON_GENERIC_DEPENDENCIES_H

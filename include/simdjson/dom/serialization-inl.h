@@ -5,7 +5,7 @@
 #include "simdjson/dom/base.h"
 #include "simdjson/dom/parser.h"
 #include "simdjson/dom/serialization.h"
-#include "simdjson/internal/jeaiii.h"
+#include "simdjson/internal/write_uint.h"
 #include "simdjson/internal/json_escape.h"
 #include "simdjson/internal/tape_type.h"
 
@@ -87,16 +87,15 @@ namespace internal {
 
 template <class formatter>
 simdjson_inline void base_formatter<formatter>::number(uint64_t x) {
-  // write_uint_jeaiii may store one byte before its output pointer.
-  char number_buffer[24];
-  chars(number_buffer + 1, write_uint_jeaiii(number_buffer + 1, x));
+  simdjson_indeterminate char number_buffer[24];
+  chars(number_buffer + 1, write_uint(number_buffer + 1, x));
 }
 
 template <class formatter>
 simdjson_inline void base_formatter<formatter>::number(int64_t x) {
-  char number_buffer[24];
+  simdjson_indeterminate char number_buffer[24];
   // 0 - uint64_t(x) is the magnitude, also for INT64_MIN.
-  char *end = write_uint_jeaiii(number_buffer + 1, x < 0 ? 0 - uint64_t(x) : uint64_t(x));
+  char *end = write_uint(number_buffer + 1, x < 0 ? 0 - uint64_t(x) : uint64_t(x));
   number_buffer[0] = '-';
   chars(number_buffer + (x >= 0), end);
 }
@@ -121,7 +120,7 @@ simdjson_inline void base_formatter<formatter>::number(double x) {
 
   // Must be to_chars_buffer_size (40): only ~24 chars are emitted, but
   // to_chars over-writes with fixed-size 16/17-byte copies for inlining.
-  char number_buffer[simdjson::internal::to_chars_buffer_size];
+  simdjson_indeterminate char number_buffer[simdjson::internal::to_chars_buffer_size];
   // Currently, passing the nullptr to the second argument is
   // safe because our implementation does not check the second
   // argument.

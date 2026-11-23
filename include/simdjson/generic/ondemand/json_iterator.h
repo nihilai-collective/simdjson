@@ -90,6 +90,36 @@ public:
   simdjson_inline error_code out_of_place_error() noexcept;
   /** Tells whether the string before pos, followed by a colon, is a key. */
   static bool string_is_key(const uint8_t *json, token_position pos, token_position root, token_position end) noexcept;
+  /**
+   * Validates the array or object at the current position and everything in it, without
+   * recursion. Outside of streaming mode, it also checks that nothing follows it. It does
+   * not move the iterator.
+   */
+  simdjson_warn_unused error_code validate_container() noexcept;
+  static simdjson_inline bool has_backslash(const uint8_t *src, size_t len) noexcept;
+  template <typename BQ>
+  static simdjson_inline bool has_backslash(const uint8_t *src, size_t len, std::true_type) noexcept;
+  template <typename BQ>
+  static simdjson_inline bool has_backslash(const uint8_t *src, size_t len, std::false_type) noexcept;
+  static simdjson_inline size_t count_digits(const uint8_t *p) noexcept;
+  static simdjson_inline error_code validate_number(const uint8_t *src) noexcept;
+  static simdjson_inline error_code validate_scalar(const uint8_t *src, bool last) noexcept;
+  /**
+   * Calls the visitor for the array or object at the start position and everything in it,
+   * without recursion (see document::visit()). The container is at depth parent_depth + 1. At
+   * the root (parent_depth == 0) and outside of streaming mode, it also checks that nothing
+   * follows it. It does not move the iterator. Escaped strings are copied into the string
+   * buffer.
+   */
+  template <typename V>
+  simdjson_warn_unused error_code visit_container(V &visitor, token_position start, size_t parent_depth);
+  template <typename V>
+  simdjson_warn_unused simdjson_inline error_code visit_string(const uint8_t *quote, bool key, V &visitor);
+  template <typename V>
+  simdjson_warn_unused simdjson_inline error_code visit_scalar(const uint8_t *src, V &visitor);
+  /** Calls the visitor for a number that numberparsing::parse_number accepted. */
+  template <typename V>
+  static simdjson_warn_unused simdjson_inline error_code visit_number(const number &value, const char *raw, V &visitor);
 
   /**
    * Tell whether the iterator is still at the start
@@ -279,7 +309,8 @@ public:
   /**
    * Take an input in json containing max_len characters and attempt to copy it over to tmpbuf, a buffer with
    * N bytes of capacity. It will return false if N is too small (smaller than max_len) of if it is zero.
-   * Trailing whitespace, commas, and record separators (0x1E) do not count toward max_len.
+   * Trailing whitespace does not count toward max_len. A comma or record
+   * separator (0x1E) is ignored only for a document stream.
    * The buffer (tmpbuf) is padded with space characters.
    */
   simdjson_warn_unused simdjson_inline bool copy_to_buffer(const uint8_t *json, uint32_t max_len, uint8_t *tmpbuf, size_t N) noexcept;
