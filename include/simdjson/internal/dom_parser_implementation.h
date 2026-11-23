@@ -262,6 +262,12 @@ public:
    */
   bool _bounded_batch{false};
 
+  /**
+   * Whether kernels that provide a table-based structural index writer
+   * (currently haswell) use it in stage 1 instead of the default writer.
+   */
+  bool _table_bit_indexer{false};
+
 protected:
 
   // Declaring these so that subclasses can use them to implement their constructors.

@@ -8,21 +8,21 @@
 #include <simdjson/haswell.h>
 #include <simdjson/haswell/implementation.h>
 
-// defining SIMDJSON_GENERIC_JSON_STRUCTURAL_INDEXER_CUSTOM_BIT_INDEXER allows us to provide our own bit_indexer::write
-#define SIMDJSON_GENERIC_JSON_STRUCTURAL_INDEXER_CUSTOM_BIT_INDEXER
+// defining SIMDJSON_GENERIC_JSON_STRUCTURAL_INDEXER_TABLE_BIT_INDEXER allows us to provide bit_indexer::write_table
+#define SIMDJSON_GENERIC_JSON_STRUCTURAL_INDEXER_TABLE_BIT_INDEXER
 
 #include <simdjson/haswell/begin.h>
 #include <generic/amalgamated.h>
 #include <generic/stage1/amalgamated.h>
 #include <generic/stage2/amalgamated.h>
 
-#undef SIMDJSON_GENERIC_JSON_STRUCTURAL_INDEXER_CUSTOM_BIT_INDEXER
+#undef SIMDJSON_GENERIC_JSON_STRUCTURAL_INDEXER_TABLE_BIT_INDEXER
 
 namespace simdjson { namespace haswell { namespace { namespace stage1 {
 
 // Row b holds the positions of the set bits of the byte b, in increasing
 // order. The generic bit_indexer::write branches on the number of set bits,
-// which varies from block to block and is hard to predict. This version
+// which varies from block to block and is hard to predict. write_table
 // expands the mask one byte at a time with a fixed trip count: it always
 // stores eight indexes and advances by the popcount of the byte.
 alignas(64) static const uint8_t BIT_POSITIONS[256][8] = {
@@ -284,7 +284,7 @@ alignas(64) static const uint8_t BIT_POSITIONS[256][8] = {
   {0, 1, 2, 3, 4, 5, 6, 7}
 };
 
-simdjson_inline void bit_indexer::write(uint32_t idx, uint64_t bits) {
+simdjson_inline void bit_indexer::write_table(uint32_t idx, uint64_t bits) {
   if (bits == 0) { return; }
   uint32_t *dst = this->tail;
   __m256i base = _mm256_set1_epi32(static_cast<int>(idx));
@@ -412,7 +412,10 @@ simdjson_warn_unused error_code implementation::minify(const uint8_t *buf, size_
 simdjson_warn_unused error_code dom_parser_implementation::stage1(const uint8_t *_buf, size_t _len, stage1_mode streaming) noexcept {
   this->buf = _buf;
   this->len = _len;
-  return haswell::stage1::json_structural_indexer::index<128>(_buf, _len, *this, streaming);
+  if (_table_bit_indexer) {
+    return haswell::stage1::json_structural_indexer_t<true>::index<128>(_buf, _len, *this, streaming);
+  }
+  return haswell::stage1::json_structural_indexer_t<false>::index<128>(_buf, _len, *this, streaming);
 }
 
 simdjson_warn_unused bool implementation::validate_utf8(const char *buf, size_t len) const noexcept {

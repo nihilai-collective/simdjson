@@ -18,7 +18,8 @@ class json_minifier;
 class json_scanner;
 struct json_string_block;
 class json_string_scanner;
-class json_structural_indexer;
+template<bool TABLE_BIT_INDEXER>
+class json_structural_indexer_t;
 
 } // namespace stage1
 
