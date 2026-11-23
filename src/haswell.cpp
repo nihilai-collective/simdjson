@@ -299,7 +299,7 @@ simdjson_inline void bit_indexer::write_table(uint32_t idx, uint64_t bits) {
   this->tail = dst;
 }
 
-}}} // namespace simdjson::haswell::(anonymous)::stage1
+}}}} // namespace simdjson::haswell::(anonymous)::stage1
 
 //
 // Stage 1
