@@ -16,6 +16,22 @@ namespace jsonifier {
 
 template<typename index_sequence_type> struct add_tape_values;
 
+template <uint64_t arraySize>
+simdjson_inline bool
+allBitsNotActive(const std::array<uint64_t, arraySize> &__restrict cnts) {
+  if constexpr (arraySize == 1) {
+    return cnts[0] == 0;
+  } else if constexpr (arraySize == 2) {
+    return (cnts[0] | cnts[1]) == 0;
+  } else if constexpr (arraySize == 4) {
+    return (cnts[0] | cnts[1] | cnts[2] | cnts[3]) == 0;
+  } else if constexpr (arraySize == 8) {
+    return (cnts[0] | cnts[1] | cnts[2] | cnts[3] | cnts[4] | cnts[5] |
+            cnts[6] | cnts[7]) == 0;
+  }
+}
+
+
 #if SIMDJSON_JSONIFIER_AVX512
 
 template<uint64_t... indices> struct add_tape_values<std::integer_sequence<uint64_t, indices...>> {
@@ -23,11 +39,20 @@ template<uint64_t... indices> struct add_tape_values<std::integer_sequence<uint6
 
   simdjson_inline static void impl(const std::array<uint64_t, BLOCK_COUNT> &__restrict bits_arr, const std::array<uint64_t, BLOCK_COUNT> &__restrict cnts,
     write_structural_index_ptr tape, const uint64_t str_idx) noexcept {
-    uint64_t offset{0};
-    const __m512i compression_mask{_mm512_set_epi32(0x3f3e3d3c, 0x3b3a3938, 0x37363534, 0x33323130, 0x2f2e2d2c, 0x2b2a2928, 0x27262524, 0x23222120, 0x1f1e1d1c,
-      0x1b1a1918, 0x17161514, 0x13121110, 0x0f0e0d0c, 0x0b0a0908, 0x07060504, 0x03020100)};
-    const __m512i str_idx_vec{_mm512_set1_epi32(static_cast<int32_t>(str_idx))};
-    ((drain_lane<indices>(compression_mask, str_idx_vec, bits_arr, cnts, tape + offset), offset += cnts[indices]), ...);
+    if (!allBitsNotActive(cnts)) [[likely]] {
+      uint64_t offset{0};
+      const __m512i compression_mask{
+          _mm512_set_epi32(0x3f3e3d3c, 0x3b3a3938, 0x37363534, 0x33323130,
+                           0x2f2e2d2c, 0x2b2a2928, 0x27262524, 0x23222120,
+                           0x1f1e1d1c, 0x1b1a1918, 0x17161514, 0x13121110,
+                           0x0f0e0d0c, 0x0b0a0908, 0x07060504, 0x03020100)};
+      const __m512i str_idx_vec{
+          _mm512_set1_epi32(static_cast<int32_t>(str_idx))};
+      ((drain_lane<indices>(compression_mask, str_idx_vec, bits_arr, cnts,
+                            tape + offset),
+        offset += cnts[indices]),
+       ...);
+    }
   }
 
   template<uint64_t index> simdjson_inline static void drain_lane(const __m512i compression_mask, const __m512i str_idx_vec,
@@ -91,9 +116,13 @@ template<uint64_t... indices> struct add_tape_values<std::integer_sequence<uint6
   using lane_writer = write_indices_stepped<std::make_integer_sequence<uint64_t, 64 / TAPE_STEP>>;
 
   simdjson_inline static void impl(const std::array<uint64_t, BLOCK_COUNT> &__restrict bits_arr, const std::array<uint64_t, BLOCK_COUNT> &__restrict cnts,
-    write_structural_index_ptr tape, const uint64_t str_idx) noexcept {
-    uint64_t offset{0};
-    ((drain_lane<indices>(bits_arr, cnts, tape + offset, str_idx), offset += cnts[indices]), ...);
+       write_structural_index_ptr tape, const uint64_t str_idx) noexcept {
+    if (!allBitsNotActive(cnts)) [[likely]] {
+      uint64_t offset{0};
+      ((drain_lane<indices>(bits_arr, cnts, tape + offset, str_idx),
+        offset += cnts[indices]),
+       ...);
+    }
   }
 
   template<uint64_t index> simdjson_inline static void drain_lane(const std::array<uint64_t, BLOCK_COUNT> &__restrict bits_arr,

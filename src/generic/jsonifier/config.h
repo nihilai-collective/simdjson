@@ -64,15 +64,12 @@ using read_buffer_ptr = const uint8_t *__restrict;
 using write_buffer_ptr = uint8_t *__restrict;
 using write_structural_index_ptr = uint32_t *__restrict;
 
-// SIMDJSON_JSONIFIER_BLOCKS_PER_STEP (1, 2, 4 or 8) overrides the per-compiler
-// default below, for tuning experiments.
+// SIMDJSON_JSONIFIER_BLOCKS_PER_STEP (1, 2, 4 or 8) overrides the default
+// below, for tuning experiments. AVX-512 steps over 8 blocks on every compiler:
+// GCC and MSVC both measured faster at 8 than at their old 4 and 2.
 #if defined(SIMDJSON_JSONIFIER_BLOCKS_PER_STEP)
 inline constexpr uint64_t BLOCKS_PER_STEP{SIMDJSON_JSONIFIER_BLOCKS_PER_STEP};
-#elif SIMDJSON_JSONIFIER_AVX512 && SIMDJSON_JSONIFIER_GCC
-inline constexpr uint64_t BLOCKS_PER_STEP{4};
-#elif SIMDJSON_JSONIFIER_AVX512 && SIMDJSON_JSONIFIER_MSVC
-inline constexpr uint64_t BLOCKS_PER_STEP{2};
-#elif SIMDJSON_JSONIFIER_AVX512 && SIMDJSON_JSONIFIER_CLANG
+#elif SIMDJSON_JSONIFIER_AVX512
 inline constexpr uint64_t BLOCKS_PER_STEP{8};
 #else
 inline constexpr uint64_t BLOCKS_PER_STEP{4};
